@@ -26,3 +26,7 @@ if ! dotfiles checkout; then
 fi
 
 echo "Dotfiles successfully bootstrapped."
+
+if [ ! -f "$HOME/.gitconfig.local" ]; then
+    echo "Note: create ~/.gitconfig.local with your [user] name and email."
+fi
