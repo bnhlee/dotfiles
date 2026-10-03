@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DOTFILES_REPO="https://github.com/bnhlee/dotfiles.git"
+DOTFILES_DIR="$HOME/.dotfiles"
+
+if [ ! -d "$DOTFILES_DIR" ]; then
+    git clone --bare "$DOTFILES_REPO" "$DOTFILES_DIR"
+fi
+
+dotfiles() {
+    git --git-dir="$DOTFILES_DIR" --work-tree="$HOME" "$@"
+}
+
+dotfiles config status.showUntrackedFiles no
+backup="$HOME/.dotfiles-backup"
+
+if ! dotfiles checkout; then
+    mkdir -p "$backup"
+    echo "Backing up pre-existing conflicting dotfiles..."
+    { dotfiles checkout 2>&1 || true; } | grep -E "\s+\." | awk '{print $1}' | while read -r f; do
+        mkdir -p "$backup/$(dirname "$f")"
+        mv "$HOME/$f" "$backup/$f"
+    done
+    dotfiles checkout
+fi
+
+echo "Dotfiles successfully bootstrapped."
