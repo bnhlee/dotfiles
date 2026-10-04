@@ -1,32 +1,223 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+    cat <<EOF
+Usage:
+  dotfiles-bootstrap                Clone the dotfiles and install extras from the internet
+  dotfiles-bootstrap pack [FILE]    Build an offline package of the dotfiles, nvim plugins,
+                                    treesitter parsers and Nerd Font
+  dotfiles-bootstrap apply PATH     Install from an offline package, given as the .tar.gz
+                                    or the extracted dotfiles-offline directory
+EOF
+}
+
 DOTFILES_REPO="https://github.com/bnhlee/dotfiles.git"
 DOTFILES_DIR="$HOME/.dotfiles"
 
-if [ ! -d "$DOTFILES_DIR" ]; then
-    git clone --bare "$DOTFILES_REPO" "$DOTFILES_DIR"
-fi
+NERD_FONT="JetBrainsMono"
+FONT_DIR="$HOME/.local/share/fonts/${NERD_FONT}Nerd"
+# Plugins (vim.pack), compiled treesitter parsers and their queries
+NVIM_SITE="$HOME/.local/share/nvim/site"
+
+# Temporary directory for pack/apply, removed on exit
+STAGE=""
+cleanup() {
+    if [ -n "$STAGE" ]; then rm -rf "$STAGE"; fi
+}
+trap cleanup EXIT
 
 dotfiles() {
     git --git-dir="$DOTFILES_DIR" --work-tree="$HOME" "$@"
 }
 
-dotfiles config status.showUntrackedFiles no
-backup="$HOME/.dotfiles-backup"
+# Check out the bare repo into $HOME, moving conflicting files aside
+checkout_dotfiles() {
+    dotfiles config status.showUntrackedFiles no
+    local backup="$HOME/.dotfiles-backup"
 
-if ! dotfiles checkout; then
-    mkdir -p "$backup"
-    echo "Backing up pre-existing conflicting dotfiles..."
-    { dotfiles checkout 2>&1 || true; } | grep -E "\s+\." | awk '{print $1}' | while read -r f; do
-        mkdir -p "$backup/$(dirname "$f")"
-        mv "$HOME/$f" "$backup/$f"
-    done
-    dotfiles checkout
-fi
+    if ! dotfiles checkout; then
+        mkdir -p "$backup"
+        echo "Backing up pre-existing conflicting dotfiles..."
+        { dotfiles checkout 2>&1 || true; } | grep -E "\s+\." | awk '{print $1}' | while read -r f; do
+            mkdir -p "$backup/$(dirname "$f")"
+            mv "$HOME/$f" "$backup/$f"
+        done
+        dotfiles checkout
+    fi
 
-echo "Dotfiles successfully bootstrapped."
+    echo "Dotfiles successfully bootstrapped."
+}
 
-if [ ! -f "$HOME/.gitconfig.local" ]; then
-    echo "Note: create ~/.gitconfig.local with your [user] name and email."
-fi
+# Nerd Font, for the file/git icons in nvim
+FONT_URL="https://github.com/ryanoasis/nerd-fonts/releases/latest/download/${NERD_FONT}.tar.xz"
+
+download_font() {
+    mkdir -p "$1"
+    curl -fsSL "$FONT_URL" | tar xJ -C "$1"
+}
+
+has_font_files() {
+    compgen -G "$1/*.ttf" >/dev/null
+}
+
+font_installed() {
+    # Not grep -q: it exits early, and pipefail turns fc-list's SIGPIPE into a failure
+    fc-list | grep "${NERD_FONT} Nerd Font" >/dev/null
+}
+
+# Point GNOME Terminal's default profile at the font, unless a font was already picked
+set_terminal_font() {
+    command -v gnome-terminal >/dev/null && command -v gsettings >/dev/null || return 0
+    local profile schema
+    profile=$(gsettings get org.gnome.Terminal.ProfilesList default 2>/dev/null | tr -d "'") || return 0
+    [ -n "$profile" ] || return 0
+    schema="org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:$profile/"
+    if [ "$(gsettings get "$schema" use-system-font)" = "true" ]; then
+        gsettings set "$schema" font "${NERD_FONT} Nerd Font 11"
+        gsettings set "$schema" use-system-font false
+        echo "GNOME Terminal font set to ${NERD_FONT} Nerd Font."
+    fi
+}
+
+# Caps Lock as Ctrl (GNOME; Ctrl-[ then works as Esc). Other XKB options are
+# kept, and an existing Caps Lock option is left alone.
+set_caps_ctrl() {
+    command -v gsettings >/dev/null || return 0
+    local key="org.gnome.desktop.input-sources" options
+    options=$(gsettings get "$key" xkb-options 2>/dev/null) || return 0
+    case "$options" in
+        *"caps:"*) return 0 ;;
+        "@as []" | "[]") options="['caps:ctrl_modifier']" ;;
+        *) options="${options%]}, 'caps:ctrl_modifier']" ;;
+    esac
+    gsettings set "$key" xkb-options "$options"
+    echo "Caps Lock remapped to Ctrl."
+}
+
+gitconfig_note() {
+    if [ ! -f "$HOME/.gitconfig.local" ]; then
+        echo "Note: create ~/.gitconfig.local with your [user] name and email."
+    fi
+}
+
+bootstrap_online() {
+    if [ ! -d "$DOTFILES_DIR" ]; then
+        git clone --bare "$DOTFILES_REPO" "$DOTFILES_DIR"
+    fi
+    checkout_dotfiles
+
+    if ! font_installed; then
+        echo "Installing ${NERD_FONT} Nerd Font..."
+        download_font "$FONT_DIR"
+        fc-cache -f
+    fi
+    set_terminal_font
+    set_caps_ctrl
+    gitconfig_note
+}
+
+pack() {
+    local out="${1:-$PWD/dotfiles-offline-$(uname -m)-$(date +%Y%m%d).tar.gz}"
+    STAGE=$(mktemp -d)
+    local root="$STAGE/dotfiles-offline"
+    mkdir -p "$root"
+
+    if [ -n "$(dotfiles status --porcelain)" ]; then
+        echo "Warning: the dotfiles repo has uncommitted changes; only committed files are packed." >&2
+    fi
+    echo "Packing dotfiles repo..."
+    dotfiles bundle create "$root/dotfiles.bundle" --all
+
+    if [ -d "$NVIM_SITE" ]; then
+        echo "Packing nvim plugins and treesitter parsers..."
+        cp -a "$NVIM_SITE" "$root/nvim-site"
+    else
+        echo "Warning: $NVIM_SITE not found; start nvim once online to install plugins." >&2
+    fi
+
+    # Kept as the release .tar.xz: ~7M instead of ~230M unpacked
+    echo "Packing ${NERD_FONT} Nerd Font..."
+    if ! curl -fsSL "$FONT_URL" -o "$root/font.tar.xz"; then
+        rm -f "$root/font.tar.xz"
+        if has_font_files "$FONT_DIR"; then
+            tar cJf "$root/font.tar.xz" -C "$FONT_DIR" .
+        else
+            echo "Warning: couldn't download the font and it isn't installed; skipping." >&2
+        fi
+    fi
+
+    cp -a "$(realpath "${BASH_SOURCE[0]}")" "$root/dotfiles-bootstrap"
+    {
+        echo "created: $(date -Iseconds)"
+        echo "arch: $(uname -m)"
+        echo "commit: $(dotfiles rev-parse --short HEAD)"
+        command -v nvim >/dev/null && echo "nvim: $(nvim --version | head -1)"
+    } >"$root/MANIFEST"
+
+    tar czf "$out" -C "$STAGE" dotfiles-offline
+    echo "Created $out ($(du -h "$out" | cut -f1))"
+    echo "On the target machine: tar xzf $(basename "$out") && dotfiles-offline/dotfiles-bootstrap apply dotfiles-offline"
+}
+
+apply() {
+    local src="${1:?Usage: dotfiles-bootstrap apply PATH}"
+    local root
+    if [ -d "$src" ]; then
+        root="$src"
+    else
+        STAGE=$(mktemp -d)
+        tar xzf "$src" -C "$STAGE"
+        root="$STAGE/dotfiles-offline"
+    fi
+    [ -f "$root/MANIFEST" ] || { echo "Not an offline package: $src" >&2; exit 1; }
+    cat "$root/MANIFEST"
+
+    # Parsers and fzf-native are compiled binaries
+    local packed_arch
+    packed_arch=$(sed -n 's/^arch: //p' "$root/MANIFEST")
+    if [ "$packed_arch" != "$(uname -m)" ]; then
+        echo "Warning: package was built on $packed_arch but this machine is $(uname -m);" \
+            "compiled parsers and telescope-fzf-native won't run." >&2
+    fi
+
+    if [ -d "$DOTFILES_DIR" ]; then
+        echo "$DOTFILES_DIR already exists; leaving the repo as is."
+    else
+        git clone --bare "$root/dotfiles.bundle" "$DOTFILES_DIR"
+        # Pull/push from GitHub later, when there's internet
+        dotfiles remote set-url origin "$DOTFILES_REPO"
+    fi
+    checkout_dotfiles
+
+    if [ -d "$root/nvim-site" ]; then
+        echo "Installing nvim plugins and treesitter parsers..."
+        mkdir -p "$NVIM_SITE"
+        # Replace each packaged plugin wholesale rather than merging two git checkouts
+        local plugin
+        for plugin in "$root/nvim-site/pack/core/opt"/*/; do
+            rm -rf "$NVIM_SITE/pack/core/opt/$(basename "$plugin")"
+        done
+        # --remove-destination: git object files are read-only
+        cp -a --remove-destination "$root/nvim-site/." "$NVIM_SITE/"
+    fi
+
+    if ! font_installed && [ -f "$root/font.tar.xz" ]; then
+        echo "Installing ${NERD_FONT} Nerd Font..."
+        mkdir -p "$FONT_DIR"
+        tar xJf "$root/font.tar.xz" -C "$FONT_DIR"
+        fc-cache -f
+    fi
+    set_terminal_font
+    set_caps_ctrl
+
+    gitconfig_note
+}
+
+case "${1:-}" in
+    "") bootstrap_online ;;
+    pack) shift; pack "$@" ;;
+    apply) shift; apply "$@" ;;
+    -h | --help | help) usage ;;
+    *) usage >&2; exit 1 ;;
+esac
