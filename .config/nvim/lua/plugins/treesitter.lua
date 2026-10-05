@@ -1,5 +1,8 @@
--- Parsers are compiled with the tree-sitter CLI; no-op once installed
-require("nvim-treesitter").install({
+local M = {}
+
+-- Parsers are compiled with the tree-sitter CLI; no-op once installed.
+-- The task is kept so dotfiles-bootstrap can wait for it to finish.
+M.install_task = require("nvim-treesitter").install({
     "go", "gomod", "gosum", "gowork",
     "bash", "lua", "vim", "vimdoc", "query",
     "json", "yaml", "toml",
@@ -17,3 +20,5 @@ vim.api.nvim_create_autocmd("FileType", {
         end
     end,
 })
+
+return M

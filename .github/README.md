@@ -21,10 +21,10 @@ added explicitly.
 curl -fsSL https://raw.githubusercontent.com/bnhlee/dotfiles/main/.local/bin/dotfiles-bootstrap | bash
 ```
 
-This clones the repo, checks it out into `$HOME` (moving conflicting files to
-`~/.dotfiles-backup`), installs the Nerd Font and applies the GNOME settings
-below. Neovim downloads its plugins and builds the treesitter parsers the first
-time it starts.
+This clones the repo, checks it out into `$HOME` (existing files that differ
+are moved to `~/.dotfiles-backup`), installs the Nerd Font, applies the GNOME
+settings below, and installs the Neovim plugins and treesitter parsers, so nvim
+is ready on first start.
 
 ### Without internet
 
@@ -57,8 +57,9 @@ email.
 - Optional: golangci-lint, for errcheck and other linters on open/save
   (`curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b ~/go/bin`)
 - ripgrep and fd, for telescope search
-- Online installs only: a C compiler, `make` and the `tree-sitter` CLI, to
-  build the treesitter parsers and telescope-fzf-native on first start
+- Online installs only: `build-essential` (C compiler, libc headers, `make`)
+  and the `tree-sitter` CLI, to build the treesitter parsers and
+  telescope-fzf-native on first start
 
 ## What it configures
 

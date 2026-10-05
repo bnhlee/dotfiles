@@ -31,22 +31,98 @@ dotfiles() {
     git --git-dir="$DOTFILES_DIR" --work-tree="$HOME" "$@"
 }
 
-# Check out the bare repo into $HOME, moving conflicting files aside
+clone_dotfiles() {
+    # -c: avoids git's "default branch name" hint; the branch comes from the source
+    git -c init.defaultBranch=main clone --quiet --bare "$1" "$DOTFILES_DIR"
+}
+
+# Check out the bare repo into $HOME. Existing files in the way are replaced:
+# identical ones silently, others after moving them to ~/.dotfiles-backup.
 checkout_dotfiles() {
     dotfiles config status.showUntrackedFiles no
-    local backup="$HOME/.dotfiles-backup"
+    local backup="$HOME/.dotfiles-backup" f
+    local moved=()
 
-    if ! dotfiles checkout; then
-        mkdir -p "$backup"
-        echo "Backing up pre-existing conflicting dotfiles..."
-        { dotfiles checkout 2>&1 || true; } | grep -E "\s+\." | awk '{print $1}' | while read -r f; do
-            mkdir -p "$backup/$(dirname "$f")"
-            mv "$HOME/$f" "$backup/$f"
-        done
-        dotfiles checkout
+    if ! dotfiles checkout >/dev/null 2>&1; then
+        while IFS= read -r f; do
+            [ -e "$HOME/$f" ] || [ -L "$HOME/$f" ] || continue
+            if [ -f "$HOME/$f" ] && dotfiles show "HEAD:$f" | cmp -s - "$HOME/$f"; then
+                rm "$HOME/$f"
+            else
+                mkdir -p "$backup/$(dirname "$f")"
+                mv "$HOME/$f" "$backup/$f"
+                moved+=("$f")
+            fi
+        done < <(dotfiles ls-tree -r --name-only HEAD)
+        dotfiles checkout >/dev/null
     fi
 
-    echo "Dotfiles successfully bootstrapped."
+    echo "Dotfiles checked out into $HOME."
+    if [ ${#moved[@]} -gt 0 ]; then
+        echo "These existing files differed from the dotfiles and were moved to $backup:"
+        printf '  %s\n' "${moved[@]}"
+    fi
+}
+
+# nvim-treesitter links site/queries/<lang> into the plugin with absolute paths,
+# which break when $HOME differs. Point every absolute link under the site
+# directory back into it with a relative path.
+fix_site_links() {
+    local site="$1" link target rel
+    while IFS= read -r -d '' link; do
+        target=$(readlink "$link")
+        case "$target" in
+            */.local/share/nvim/site/*)
+                rel=$(realpath -m -s --relative-to="$(dirname "$link")" "$site/${target#*/.local/share/nvim/site/}")
+                ln -sfn "$rel" "$link"
+                ;;
+        esac
+    done < <(find "$site" -type l -lname '/*' -print0)
+}
+
+# Install the nvim plugins, treesitter parsers and blink.cmp's fuzzy matcher
+# now, instead of on the first interactive start
+install_nvim_plugins() {
+    if ! command -v nvim >/dev/null; then
+        echo "nvim not found; plugins will install the first time it starts."
+        return 0
+    fi
+    local tool
+    for tool in cc make tree-sitter; do
+        command -v "$tool" >/dev/null || echo "Warning: $tool not found; treesitter parsers or telescope-fzf-native may fail to build." >&2
+    done
+
+    echo "Installing nvim plugins and treesitter parsers (can take a few minutes)..."
+    local script
+    script=$(mktemp --suffix=.lua)
+    cat >"$script" <<'EOF'
+-- init.lua has already installed the plugins (vim.pack.add) and built fzf-native
+local ok, ts = pcall(require, "plugins.treesitter")
+if ok and ts.install_task then
+    -- pwait() returns false on timeout instead of throwing, so nvim still quits.
+    -- nvim-treesitter's log lines don't end in a newline, hence the leading \n.
+    local wait_ok, err = ts.install_task:pwait(10 * 60 * 1000)
+    if not wait_ok then
+        io.stderr:write("\nTreesitter install failed: " .. tostring(err) .. "\n")
+    end
+end
+-- blink.cmp's setup() starts the download; it writes v0.0.0 until the binary is verified
+local version_file = vim.fn.stdpath("data") .. "/site/pack/core/opt/blink.cmp/target/release/version"
+local blink_ok = vim.wait(2 * 60 * 1000, function()
+    local f = io.open(version_file)
+    if not f then return false end
+    local v = f:read("*l")
+    f:close()
+    return v ~= nil and v ~= "v0.0.0"
+end, 500)
+local parsers = #vim.fn.glob(vim.fn.stdpath("data") .. "/site/parser/*.so", false, true)
+io.stdout:write(("\nInstalled %d plugins, %d treesitter parsers%s\n"):format(
+    #vim.pack.get(), parsers, blink_ok and "" or "; blink.cmp fuzzy matcher download didn't finish"))
+vim.cmd("qa!")
+EOF
+    # The second -c quits even if the script errors before its own qa!
+    nvim --headless -c "luafile $script" -c 'qa!'
+    rm -f "$script"
 }
 
 # Nerd Font, for the file/git icons in nvim
@@ -103,7 +179,7 @@ gitconfig_note() {
 
 bootstrap_online() {
     if [ ! -d "$DOTFILES_DIR" ]; then
-        git clone --bare "$DOTFILES_REPO" "$DOTFILES_DIR"
+        clone_dotfiles "$DOTFILES_REPO"
     fi
     checkout_dotfiles
 
@@ -114,6 +190,7 @@ bootstrap_online() {
     fi
     set_terminal_font
     set_caps_ctrl
+    install_nvim_plugins
     gitconfig_note
 }
 
@@ -132,6 +209,7 @@ pack() {
     if [ -d "$NVIM_SITE" ]; then
         echo "Packing nvim plugins and treesitter parsers..."
         cp -a "$NVIM_SITE" "$root/nvim-site"
+        fix_site_links "$root/nvim-site"
     else
         echo "Warning: $NVIM_SITE not found; start nvim once online to install plugins." >&2
     fi
@@ -184,7 +262,7 @@ apply() {
     if [ -d "$DOTFILES_DIR" ]; then
         echo "$DOTFILES_DIR already exists; leaving the repo as is."
     else
-        git clone --bare "$root/dotfiles.bundle" "$DOTFILES_DIR"
+        clone_dotfiles "$root/dotfiles.bundle"
         # Pull/push from GitHub later, when there's internet
         dotfiles remote set-url origin "$DOTFILES_REPO"
     fi
@@ -200,6 +278,8 @@ apply() {
         done
         # --remove-destination: git object files are read-only
         cp -a --remove-destination "$root/nvim-site/." "$NVIM_SITE/"
+        # Also repairs packages made before pack fixed the links
+        fix_site_links "$NVIM_SITE"
     fi
 
     if ! font_installed && [ -f "$root/font.tar.xz" ]; then
