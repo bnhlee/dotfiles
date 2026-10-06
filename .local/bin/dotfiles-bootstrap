@@ -6,7 +6,8 @@ usage() {
 Usage:
   dotfiles-bootstrap                Clone the dotfiles and install extras from the internet
   dotfiles-bootstrap pack [FILE]    Build an offline package of the dotfiles, nvim plugins,
-                                    treesitter parsers and Nerd Font
+                                    treesitter parsers, language servers, delta
+                                    and Nerd Font
   dotfiles-bootstrap apply PATH     Install from an offline package, given as the .tar.gz
                                     or the extracted dotfiles-offline directory
 EOF
@@ -147,31 +148,163 @@ font_installed() {
 DELTA_RELEASES="https://github.com/dandavison/delta/releases"
 DELTA_BIN="$HOME/.local/bin/delta"
 
-# A delta that's present but won't run (wrong arch, missing glibc or libraries)
-# breaks every paged git command, since .gitconfig only checks it exists
-delta_runs() {
+# Whether a downloaded binary actually runs here (wrong arch, missing glibc or
+# libraries). For delta this matters: one that's present but won't run breaks
+# every paged git command, since .gitconfig only checks it exists.
+bin_runs() {
     "$1" --version >/dev/null 2>&1
 }
 
+# Latest release tag of a GitHub repo, given its releases URL.
+# The latest release redirects to .../tag/<tag>.
+latest_tag() {
+    curl -fsSI "$1/latest" | sed -n 's|^location:.*/tag/\([^[:space:]]*\).*|\1|Ip' | grep .
+}
+
 delta_installed() {
-    delta_runs delta || delta_runs "$DELTA_BIN"
+    bin_runs delta || bin_runs "$DELTA_BIN"
 }
 
 # Download the latest delta binary for this machine to $1
 download_delta() {
     local tag
-    # The latest release redirects to .../tag/<version>
-    tag=$(curl -fsSI "$DELTA_RELEASES/latest" | sed -n 's|^location:.*/tag/\([^[:space:]]*\).*|\1|Ip')
-    [ -n "$tag" ] || return 1
+    tag=$(latest_tag "$DELTA_RELEASES") || return 1
     local tmp status=0
     tmp=$(mktemp -d)
     curl -fsSL "$DELTA_RELEASES/download/$tag/delta-$tag-$(uname -m)-unknown-linux-gnu.tar.gz" \
         | tar xz -C "$tmp" --strip-components=1 --wildcards '*/delta' \
-        && delta_runs "$tmp/delta" \
+        && bin_runs "$tmp/delta" \
         && install -D -m 755 "$tmp/delta" "$1" \
         || status=1
     rm -rf "$tmp"
     return $status
+}
+
+# Language servers for nvim (see ~/.config/nvim/lsp/): bash (plus shellcheck,
+# which gives it its diagnostics), Lua, PowerShell and JS/TS. gopls comes from
+# `go install` instead. They all live under LSP_DIR, so pack can copy the one
+# directory, and are linked into ~/.local/bin.
+LSP_DIR="$HOME/.local/share/lsp"
+# Installed with the system npm and run by the system node (22+, which
+# typescript-language-server 6 needs). TypeScript is pinned to 6: TypeScript 7
+# (the native compiler) no longer ships the tsserver it wraps.
+NPM_SERVERS=(bash-language-server@5 typescript-language-server@6 typescript@6)
+LUA_LS_RELEASES="https://github.com/LuaLS/lua-language-server/releases"
+# PowerShellEditorServices is plain PowerShell modules, so it needs nothing to
+# pack. It runs on the system's pwsh, which the bootstrap doesn't install.
+PSES_RELEASES="https://github.com/PowerShell/PowerShellEditorServices/releases"
+SHELLCHECK_RELEASES="https://github.com/koalaman/shellcheck/releases"
+
+# lua-language-server names its Linux builds arm64 / x64
+release_arch() {
+    case "$(uname -m)" in
+        x86_64) echo x64 ;;
+        aarch64) echo arm64 ;;
+        *) uname -m ;;
+    esac
+}
+
+# Replace directory $1 with what "${@:2}" puts into a new empty directory,
+# passed as its last argument. $1 is left as it was if the command fails.
+replace_dir() {
+    local dest="$1" tmp status=0
+    shift
+    mkdir -p "$(dirname "$dest")" && tmp=$(mktemp -d "$dest.XXXXXX") || return 1
+    if "$@" "$tmp"; then
+        rm -rf "$dest" && mv -T "$tmp" "$dest" || status=1
+    else
+        status=1
+    fi
+    rm -rf "$tmp"
+    return $status
+}
+
+npm_servers_installed() {
+    local bin="$1/node/node_modules/.bin"
+    [ -x "$bin/bash-language-server" ] && [ -x "$bin/typescript-language-server" ] \
+        && [ -f "$1/node/node_modules/typescript/lib/tsserver.js" ]
+}
+
+# Into $1/node/node_modules. Pure JS (bash-language-server's parser is wasm),
+# so the result runs on any architecture.
+fetch_npm_servers() {
+    npm install --prefix "$1" --no-fund --no-audit --loglevel=error "${NPM_SERVERS[@]}"
+}
+
+fetch_lua_ls() {
+    local tag
+    tag=$(latest_tag "$LUA_LS_RELEASES") || return 1
+    curl -fsSL "$LUA_LS_RELEASES/download/$tag/lua-language-server-$tag-linux-$(release_arch).tar.gz" \
+        | tar xz -C "$1" \
+        && bin_runs "$1/bin/lua-language-server"
+}
+
+# A static binary, named for uname -m
+fetch_shellcheck() {
+    local tag
+    tag=$(latest_tag "$SHELLCHECK_RELEASES") || return 1
+    curl -fsSL "$SHELLCHECK_RELEASES/download/$tag/shellcheck-$tag.linux.$(uname -m).tar.gz" \
+        | tar xz -C "$1" --strip-components=1 \
+        && bin_runs "$1/shellcheck"
+}
+
+fetch_pses() {
+    curl -fsSL "$PSES_RELEASES/latest/download/PowerShellEditorServices.zip" -o "$1/pses.zip" \
+        || return 1
+    if command -v unzip >/dev/null; then
+        unzip -q "$1/pses.zip" -d "$1"
+    else
+        python3 -m zipfile -e "$1/pses.zip" "$1"
+    fi && rm "$1/pses.zip" \
+        && [ -f "$1/PowerShellEditorServices/Start-EditorServices.ps1" ]
+}
+
+# Download whichever language servers are missing from $1 (an LSP_DIR layout).
+# Failures are warnings: nvim only enables the servers it finds.
+install_lsp_servers() {
+    local dir="$1"
+    if ! npm_servers_installed "$dir"; then
+        if command -v npm >/dev/null; then
+            echo "Installing bash and JS/TS language servers..."
+            replace_dir "$dir/node" fetch_npm_servers \
+                || echo "Warning: couldn't install the bash and JS/TS language servers." >&2
+        else
+            echo "Warning: npm not found; skipping the bash and JS/TS language servers." >&2
+        fi
+    fi
+    if ! bin_runs "$dir/lua-language-server/bin/lua-language-server"; then
+        echo "Installing lua-language-server..."
+        replace_dir "$dir/lua-language-server" fetch_lua_ls \
+            || echo "Warning: couldn't install lua-language-server." >&2
+    fi
+    if ! bin_runs "$dir/shellcheck/shellcheck"; then
+        echo "Installing shellcheck..."
+        replace_dir "$dir/shellcheck" fetch_shellcheck \
+            || echo "Warning: couldn't install shellcheck." >&2
+    fi
+    if [ ! -f "$dir/pses/PowerShellEditorServices/Start-EditorServices.ps1" ]; then
+        echo "Installing PowerShellEditorServices..."
+        replace_dir "$dir/pses" fetch_pses \
+            || echo "Warning: couldn't install PowerShellEditorServices." >&2
+    fi
+}
+
+# Link the servers into ~/.local/bin. Files there that aren't
+# symlinks are someone else's install and are left alone.
+link_lsp_bins() {
+    local name target link
+    while read -r name target; do
+        link="$HOME/.local/bin/$name"
+        if [ -e "$target" ] && { [ -L "$link" ] || [ ! -e "$link" ]; }; then
+            mkdir -p "$HOME/.local/bin"
+            ln -sfn "$target" "$link"
+        fi
+    done <<EOF
+bash-language-server $LSP_DIR/node/node_modules/.bin/bash-language-server
+typescript-language-server $LSP_DIR/node/node_modules/.bin/typescript-language-server
+lua-language-server $LSP_DIR/lua-language-server/bin/lua-language-server
+shellcheck $LSP_DIR/shellcheck/shellcheck
+EOF
 }
 
 # Point GNOME Terminal's default profile at the font, unless a font was already picked
@@ -224,6 +357,8 @@ bootstrap_online() {
         echo "Installing delta..."
         download_delta "$DELTA_BIN" || echo "Warning: couldn't install delta; git will use less." >&2
     fi
+    install_lsp_servers "$LSP_DIR"
+    link_lsp_bins
     set_terminal_font
     set_caps_ctrl
     install_nvim_plugins
@@ -261,10 +396,17 @@ pack() {
         fi
     fi
 
+    # Starts from the installed servers and downloads whatever's missing
+    echo "Packing language servers..."
+    if [ -d "$LSP_DIR" ]; then
+        cp -a "$LSP_DIR" "$root/lsp"
+    fi
+    install_lsp_servers "$root/lsp"
+
     echo "Packing delta..."
-    if delta_runs "$DELTA_BIN"; then
+    if bin_runs "$DELTA_BIN"; then
         cp "$DELTA_BIN" "$root/delta"
-    elif delta_runs delta; then
+    elif bin_runs delta; then
         cp "$(command -v delta)" "$root/delta"
     elif ! download_delta "$root/delta"; then
         rm -f "$root/delta"
@@ -335,13 +477,31 @@ apply() {
         fc-cache -f
     fi
     if ! delta_installed && [ -f "$root/delta" ]; then
-        if delta_runs "$root/delta"; then
+        if bin_runs "$root/delta"; then
             echo "Installing delta..."
             install -D -m 755 "$root/delta" "$DELTA_BIN"
         else
             echo "Warning: packaged delta won't run on this machine; git will use less." >&2
         fi
     fi
+
+    if [ -d "$root/lsp" ]; then
+        echo "Installing language servers..."
+        mkdir -p "$LSP_DIR"
+        # Replace each packaged server wholesale, like the nvim plugins
+        local server
+        for server in "$root/lsp"/*/; do
+            rm -rf "${LSP_DIR:?}/$(basename "$server")"
+        done
+        cp -a "$root/lsp/." "$LSP_DIR/"
+        if ! command -v node >/dev/null; then
+            echo "Warning: node not found; the bash and JS/TS language servers need Node 22+." >&2
+        fi
+        if ! command -v pwsh >/dev/null; then
+            echo "Warning: pwsh not found; the PowerShell language server needs it." >&2
+        fi
+    fi
+    link_lsp_bins
     set_terminal_font
     set_caps_ctrl
 

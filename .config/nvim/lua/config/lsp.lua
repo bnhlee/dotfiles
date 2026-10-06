@@ -1,5 +1,15 @@
--- Server configs live in ~/.config/nvim/lsp/<name>.lua
-vim.lsp.enable({ "gopls" })
+-- Server configs live in ~/.config/nvim/lsp/<name>.lua. Only the installed
+-- ones are enabled, so a missing server doesn't error on every file open.
+for _, name in ipairs({ "gopls", "bashls", "lua_ls", "ts_ls", "powershell_es" }) do
+    local config = vim.lsp.config[name]
+    if vim.fn.executable(config.cmd[1]) == 1 and (not config.bundle or vim.uv.fs_stat(config.bundle)) then
+        vim.lsp.enable(name)
+    end
+end
+
+-- Servers whose formatting runs on save. The others format with gq, so their
+-- formatters don't rewrite files that follow a different style.
+local format_on_save = { gopls = true }
 
 vim.diagnostic.config({
     virtual_text = true,
@@ -37,7 +47,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
             vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled({ bufnr = bufnr }), { bufnr = bufnr })
         end, "Toggle inlay hints")
 
-        if client:supports_method("textDocument/formatting") then
+        if format_on_save[client.name] and client:supports_method("textDocument/formatting") then
             vim.api.nvim_create_autocmd("BufWritePre", {
                 group = vim.api.nvim_create_augroup("lsp_format_" .. bufnr, { clear = true }),
                 buffer = bufnr,

@@ -1,11 +1,14 @@
 vim.g.mapleader = " "
 vim.g.maplocalleader = " "
 
--- Go tools (gopls, dlv, golangci-lint) live in ~/go/bin, which isn't on PATH
--- when nvim is started outside a shell
-local go_bin = vim.fn.expand("~/go/bin")
-if not vim.tbl_contains(vim.split(vim.env.PATH, ":"), go_bin) then
-    vim.env.PATH = go_bin .. ":" .. vim.env.PATH
+-- Go tools (gopls, dlv, golangci-lint) live in ~/go/bin and the other language
+-- servers in ~/.local/bin, which may not be on PATH when nvim is started
+-- outside a shell
+for _, dir in ipairs({ "~/go/bin", "~/.local/bin" }) do
+    dir = vim.fn.expand(dir)
+    if not vim.tbl_contains(vim.split(vim.env.PATH, ":"), dir) then
+        vim.env.PATH = dir .. ":" .. vim.env.PATH
+    end
 end
 
 vim.opt.number = true
