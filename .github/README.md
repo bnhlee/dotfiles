@@ -22,8 +22,8 @@ curl -fsSL https://raw.githubusercontent.com/bnhlee/dotfiles/main/.local/bin/dot
 ```
 
 This clones the repo, checks it out into `$HOME` (existing files that differ
-are moved to `~/.dotfiles-backup`), installs the Nerd Font, delta and the
-language servers, applies the GNOME settings below, and installs the Neovim
+are moved to `~/.dotfiles-backup`), installs the Nerd Font, delta, xcape and
+the language servers, applies the GNOME settings below, and installs the Neovim
 plugins and treesitter parsers, so nvim is ready on first start.
 
 ### Without internet
@@ -42,8 +42,8 @@ dotfiles-offline/dotfiles-bootstrap apply dotfiles-offline
 ```
 
 The package contains the repo (committed changes only), the Neovim plugins and
-compiled treesitter parsers, the language servers, the font and the delta
-binary. The compiled parts only run on the same CPU architecture as the machine
+compiled treesitter parsers, the language servers, the font, and the delta
+and xcape binaries. The compiled parts only run on the same CPU architecture as the machine
 that built the package. Re-running `apply` is safe.
 
 After either install, create `~/.gitconfig.local` with your `[user]` name and
@@ -76,4 +76,4 @@ email.
 | **Language servers** | Installed to `~/.local/share/lsp` and linked into `~/.local/bin`: bash-language-server with shellcheck, lua-language-server, typescript-language-server (with TypeScript 6, or the project's own), and PowerShellEditorServices with PSScriptAnalyzer (run by the system's pwsh). To update one, delete its directory and re-run the bootstrap |
 | **Neovim** | Go IDE setup using the built-in LSP and `vim.pack`: gopls with format/organize imports on save; LSP for bash, Lua (aware of the `vim` API and plugins when editing this config), JS/TS and PowerShell, each enabled only if installed and formatted with `gq`; blink.cmp completion (LSP, paths, snippets, buffer words, `:` commands) and signature help; golangci-lint via nvim-lint; treesitter highlighting and folding; telescope; gitsigns and fugitive; nvim-dap debugging; a Go test runner (`<leader>r…`); oil file explorer. `<leader>fk` searches all keymaps. Splits open right/below, and `:s` previews its changes live |
 | **Font** | JetBrainsMono Nerd Font in `~/.local/share/fonts`, set as the GNOME Terminal font unless a custom font is already chosen |
-| **Keyboard** | Caps Lock acts as Ctrl (GNOME `xkb-options`), so `Caps+[` works as Escape. An existing Caps Lock option is left alone |
+| **Keyboard** | Caps Lock acts as Ctrl (GNOME `xkb-options`), so `Caps+[` works as Escape. An existing Caps Lock option is left alone. In X11 sessions, [xcape](https://github.com/alols/xcape) also makes a tap of Caps Lock send Escape (autostarted from `~/.config/autostart/xcape.desktop`). It's installed from the Debian package without root, so it needs apt; under Wayland it doesn't run |

@@ -6,7 +6,7 @@ usage() {
 Usage:
   dotfiles-bootstrap                Clone the dotfiles and install extras from the internet
   dotfiles-bootstrap pack [FILE]    Build an offline package of the dotfiles, nvim plugins,
-                                    treesitter parsers, language servers, delta
+                                    treesitter parsers, language servers, delta, xcape
                                     and Nerd Font
   dotfiles-bootstrap apply PATH     Install from an offline package, given as the .tar.gz
                                     or the extracted dotfiles-offline directory
@@ -336,6 +336,66 @@ set_caps_ctrl() {
     echo "Caps Lock remapped to Ctrl."
 }
 
+# xcape makes a tap of Caps Lock send Escape, while holding it is still Ctrl.
+# X11 only: under Wayland it never sees the key. The binary comes from the
+# Debian package, fetched without root, so it needs apt and runs only where
+# its X libraries are installed.
+XCAPE_BIN="$HOME/.local/bin/xcape"
+XCAPE_AUTOSTART="$HOME/.config/autostart/xcape.desktop"
+
+xcape_installed() {
+    bin_runs xcape || bin_runs "$XCAPE_BIN"
+}
+
+# Download xcape for this machine to $1
+download_xcape() {
+    command -v apt-get >/dev/null && command -v dpkg-deb >/dev/null || return 1
+    local tmp status=0
+    tmp=$(mktemp -d)
+    (cd "$tmp" && apt-get download -q=2 xcape) \
+        && dpkg-deb -x "$tmp"/xcape_*.deb "$tmp/root" \
+        && bin_runs "$tmp/root/usr/bin/xcape" \
+        && install -D -m 755 "$tmp/root/usr/bin/xcape" "$1" \
+        || status=1
+    rm -rf "$tmp"
+    return $status
+}
+
+# Start xcape at login, when Caps Lock is Ctrl (set_caps_ctrl). Otherwise a
+# tap would toggle Caps Lock as well as sending Escape. The session type is
+# checked at each login, so switching between X11 and Wayland is fine.
+set_caps_escape() {
+    command -v gsettings >/dev/null || return 0
+    case "$(gsettings get org.gnome.desktop.input-sources xkb-options 2>/dev/null)" in
+        *"caps:ctrl_modifier"*) ;;
+        *) return 0 ;;
+    esac
+    local xcape
+    xcape=$(command -v xcape || true)
+    if ! bin_runs "$xcape"; then
+        xcape="$XCAPE_BIN"
+        bin_runs "$xcape" || return 0
+    fi
+    mkdir -p "$(dirname "$XCAPE_AUTOSTART")"
+    # Exec runs: sh -c '[ "$XDG_SESSION_TYPE" = x11 ] && exec xcape ...'
+    # Desktop entries only quote with "", inside which " and $ take a \, and
+    # the file format doubles every \. printf turns each \\ here into one \.
+    {
+        echo "[Desktop Entry]"
+        echo "Type=Application"
+        echo "Name=xcape"
+        echo "Comment=Caps Lock sends Escape when tapped (X11 sessions only)"
+        # shellcheck disable=SC2016 # $XDG_SESSION_TYPE is for sh at login
+        printf 'Exec=sh -c "[ \\\\"\\\\$XDG_SESSION_TYPE\\\\" = x11 ] && exec %s -e Caps_Lock=Escape"\n' "$xcape"
+        echo "X-GNOME-Autostart-enabled=true"
+    } >"$XCAPE_AUTOSTART"
+    # Start it now too, when bootstrapping from an X11 session
+    if [ "${XDG_SESSION_TYPE:-}" = x11 ] && ! pgrep -x xcape >/dev/null; then
+        "$xcape" -e Caps_Lock=Escape
+    fi
+    echo "xcape set up: tapping Caps Lock sends Escape in X11 sessions."
+}
+
 gitconfig_note() {
     if [ ! -f "$HOME/.gitconfig.local" ]; then
         echo "Note: create ~/.gitconfig.local with your [user] name and email."
@@ -359,8 +419,14 @@ bootstrap_online() {
     fi
     install_lsp_servers "$LSP_DIR"
     link_lsp_bins
+    if ! xcape_installed; then
+        echo "Installing xcape..."
+        download_xcape "$XCAPE_BIN" \
+            || echo "Note: couldn't install xcape (needs apt and X11 libraries); skipping." >&2
+    fi
     set_terminal_font
     set_caps_ctrl
+    set_caps_escape
     install_nvim_plugins
     gitconfig_note
 }
@@ -411,6 +477,16 @@ pack() {
     elif ! download_delta "$root/delta"; then
         rm -f "$root/delta"
         echo "Warning: couldn't download delta and it isn't installed; skipping." >&2
+    fi
+
+    echo "Packing xcape..."
+    if bin_runs "$XCAPE_BIN"; then
+        cp "$XCAPE_BIN" "$root/xcape"
+    elif bin_runs xcape; then
+        cp "$(command -v xcape)" "$root/xcape"
+    elif ! download_xcape "$root/xcape"; then
+        rm -f "$root/xcape"
+        echo "Warning: couldn't download xcape (needs apt) and it isn't installed; skipping." >&2
     fi
 
     cp -a "$(realpath "${BASH_SOURCE[0]}")" "$root/dotfiles-bootstrap"
@@ -502,8 +578,18 @@ apply() {
         fi
     fi
     link_lsp_bins
+
+    if ! xcape_installed && [ -f "$root/xcape" ]; then
+        if bin_runs "$root/xcape"; then
+            echo "Installing xcape..."
+            install -D -m 755 "$root/xcape" "$XCAPE_BIN"
+        else
+            echo "Note: packaged xcape won't run here (no X11 libraries?); skipping." >&2
+        fi
+    fi
     set_terminal_font
     set_caps_ctrl
+    set_caps_escape
 
     gitconfig_note
 }
