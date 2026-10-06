@@ -11,6 +11,18 @@ vim.api.nvim_create_autocmd("TermOpen", {
     end,
 })
 
+-- Go back into terminal mode when returning to a terminal, from another split
+-- or another tmux pane (Alt-hjkl leaves terminal mode on the way out). Only
+-- while its process runs: in a finished one, any key closes the buffer.
+vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter", "FocusGained" }, {
+    callback = function()
+        local job = vim.b.terminal_job_id
+        if vim.bo.buftype == "terminal" and job and vim.fn.jobwait({ job }, 0)[1] == -1 then
+            vim.cmd.startinsert()
+        end
+    end,
+})
+
 -- Like :terminal, but starts in the project root of the current buffer
 -- (see config/root.lua)
 vim.api.nvim_create_user_command("Term", function(opts)

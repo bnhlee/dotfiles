@@ -142,6 +142,38 @@ font_installed() {
     fc-list | grep "${NERD_FONT} Nerd Font" >/dev/null
 }
 
+# delta, git's pager (see .gitconfig). Installed as the release binary in
+# ~/.local/bin, since distro packages lag behind or don't exist.
+DELTA_RELEASES="https://github.com/dandavison/delta/releases"
+DELTA_BIN="$HOME/.local/bin/delta"
+
+# A delta that's present but won't run (wrong arch, missing glibc or libraries)
+# breaks every paged git command, since .gitconfig only checks it exists
+delta_runs() {
+    "$1" --version >/dev/null 2>&1
+}
+
+delta_installed() {
+    delta_runs delta || delta_runs "$DELTA_BIN"
+}
+
+# Download the latest delta binary for this machine to $1
+download_delta() {
+    local tag
+    # The latest release redirects to .../tag/<version>
+    tag=$(curl -fsSI "$DELTA_RELEASES/latest" | sed -n 's|^location:.*/tag/\([^[:space:]]*\).*|\1|Ip')
+    [ -n "$tag" ] || return 1
+    local tmp status=0
+    tmp=$(mktemp -d)
+    curl -fsSL "$DELTA_RELEASES/download/$tag/delta-$tag-$(uname -m)-unknown-linux-gnu.tar.gz" \
+        | tar xz -C "$tmp" --strip-components=1 --wildcards '*/delta' \
+        && delta_runs "$tmp/delta" \
+        && install -D -m 755 "$tmp/delta" "$1" \
+        || status=1
+    rm -rf "$tmp"
+    return $status
+}
+
 # Point GNOME Terminal's default profile at the font, unless a font was already picked
 set_terminal_font() {
     command -v gnome-terminal >/dev/null && command -v gsettings >/dev/null || return 0
@@ -188,6 +220,10 @@ bootstrap_online() {
         download_font "$FONT_DIR"
         fc-cache -f
     fi
+    if ! delta_installed; then
+        echo "Installing delta..."
+        download_delta "$DELTA_BIN" || echo "Warning: couldn't install delta; git will use less." >&2
+    fi
     set_terminal_font
     set_caps_ctrl
     install_nvim_plugins
@@ -223,6 +259,16 @@ pack() {
         else
             echo "Warning: couldn't download the font and it isn't installed; skipping." >&2
         fi
+    fi
+
+    echo "Packing delta..."
+    if delta_runs "$DELTA_BIN"; then
+        cp "$DELTA_BIN" "$root/delta"
+    elif delta_runs delta; then
+        cp "$(command -v delta)" "$root/delta"
+    elif ! download_delta "$root/delta"; then
+        rm -f "$root/delta"
+        echo "Warning: couldn't download delta and it isn't installed; skipping." >&2
     fi
 
     cp -a "$(realpath "${BASH_SOURCE[0]}")" "$root/dotfiles-bootstrap"
@@ -287,6 +333,14 @@ apply() {
         mkdir -p "$FONT_DIR"
         tar xJf "$root/font.tar.xz" -C "$FONT_DIR"
         fc-cache -f
+    fi
+    if ! delta_installed && [ -f "$root/delta" ]; then
+        if delta_runs "$root/delta"; then
+            echo "Installing delta..."
+            install -D -m 755 "$root/delta" "$DELTA_BIN"
+        else
+            echo "Warning: packaged delta won't run on this machine; git will use less." >&2
+        fi
     fi
     set_terminal_font
     set_caps_ctrl

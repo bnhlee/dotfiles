@@ -19,6 +19,12 @@ vim.opt.hlsearch = true
 -- Case-insensitive search, unless the pattern has a capital letter
 vim.opt.ignorecase = true
 vim.opt.smartcase = true
+-- Preview :s substitutions as you type, with off-screen matches in a split
+vim.opt.inccommand = "split"
+
+-- New splits open to the right and below, rather than left and above
+vim.opt.splitright = true
+vim.opt.splitbelow = true
 
 vim.opt.wrap = false
 

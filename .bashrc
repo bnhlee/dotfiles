@@ -8,6 +8,12 @@ HISTCONTROL=ignoreboth
 shopt -s histappend
 HISTSIZE=100000
 HISTFILESIZE=200000
+# Write each command to the history file as soon as it runs, so new shells
+# (e.g. other tmux panes) see it without waiting for this one to exit
+case "$PROMPT_COMMAND" in
+    *"history -a"*) ;;
+    *) PROMPT_COMMAND="history -a${PROMPT_COMMAND:+; $PROMPT_COMMAND}" ;;
+esac
 
 shopt -s checkwinsize
 
