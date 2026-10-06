@@ -8,9 +8,21 @@ local function map(lhs, picker, desc)
     vim.keymap.set("n", lhs, picker, { desc = desc })
 end
 
-map("<leader>ff", builtin.find_files, "Find files")
-map("<leader>fg", builtin.live_grep, "Grep in project")
-map("<leader>fw", builtin.grep_string, "Grep word under cursor")
+-- File search and grep run from the current buffer's project root (git root),
+-- wherever nvim was started; the capital versions use nvim's working directory
+local root = require("config.root")
+local function in_project(picker, title)
+    return function()
+        local dir = root.get()
+        picker({ cwd = dir, prompt_title = ("%s (%s)"):format(title, vim.fs.basename(dir)) })
+    end
+end
+
+map("<leader>ff", in_project(builtin.find_files, "Find Files"), "Find files in project")
+map("<leader>fg", in_project(builtin.live_grep, "Live Grep"), "Grep in project")
+map("<leader>fw", in_project(builtin.grep_string, "Grep Word"), "Grep word under cursor in project")
+map("<leader>fF", builtin.find_files, "Find files in working directory")
+map("<leader>fG", builtin.live_grep, "Grep in working directory")
 map("<leader>fb", builtin.buffers, "Find buffers")
 map("<leader>fo", builtin.oldfiles, "Recent files")
 map("<leader>fh", builtin.help_tags, "Search help")

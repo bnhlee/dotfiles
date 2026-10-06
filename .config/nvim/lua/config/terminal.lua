@@ -11,22 +11,10 @@ vim.api.nvim_create_autocmd("TermOpen", {
     end,
 })
 
--- Directory of the current buffer: the folder shown in oil, or the file's folder
-local function buffer_dir()
-    if vim.bo.filetype == "oil" then
-        return require("oil").get_current_dir()
-    end
-    local name = vim.api.nvim_buf_get_name(0)
-    if name ~= "" and vim.uv.fs_stat(name) then
-        return vim.fs.dirname(name)
-    end
-end
-
--- Like :terminal, but starts in the git root of the current buffer
--- (falling back to its folder, then to nvim's working directory)
+-- Like :terminal, but starts in the project root of the current buffer
+-- (see config/root.lua)
 vim.api.nvim_create_user_command("Term", function(opts)
-    local dir = buffer_dir()
-    local cwd = dir and (vim.fs.root(dir, ".git") or dir) or vim.fn.getcwd()
+    local cwd = require("config.root").get()
     vim.cmd.enew()
     vim.fn.jobstart(opts.args ~= "" and opts.args or vim.o.shell, { term = true, cwd = cwd })
     vim.b.close_on_exit = true

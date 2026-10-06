@@ -5,10 +5,11 @@ local M = {}
 M.install_task = require("nvim-treesitter").install({
     "go", "gomod", "gosum", "gowork",
     "bash", "lua", "vim", "vimdoc", "query",
+    "javascript", "typescript", "tsx",
     "json", "yaml", "toml",
     "markdown", "markdown_inline",
     "diff", "gitcommit", "git_rebase",
-    "dockerfile",
+    "dockerfile", "powershell",
 })
 
 -- Highlight and fold with treesitter for any filetype that has a parser
