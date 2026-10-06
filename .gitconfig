@@ -8,5 +8,13 @@
     prune = true
 [rerere]
     enabled = true
+[rebase]
+    autoStash = true
+[merge]
+    conflictStyle = zdiff3
+[diff]
+    algorithm = histogram
+[commit]
+    verbose = true
 [include]
     path = ~/.gitconfig.local

@@ -16,8 +16,16 @@ vim.opt.shiftwidth = 4
 vim.opt.smartindent = true
 
 vim.opt.hlsearch = true
+-- Case-insensitive search, unless the pattern has a capital letter
+vim.opt.ignorecase = true
+vim.opt.smartcase = true
 
 vim.opt.wrap = false
+
+-- Keep undo history after closing a file
+vim.opt.undofile = true
+-- Yank and paste through the system clipboard (uses xclip / wl-copy)
+vim.opt.clipboard = "unnamedplus"
 
 -- Always show the sign column so git/diagnostic signs don't shift the text
 vim.opt.signcolumn = "yes"

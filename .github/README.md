@@ -57,6 +57,7 @@ email.
 - Optional: golangci-lint, for errcheck and other linters on open/save
   (`curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b ~/go/bin`)
 - ripgrep and fd, for telescope search
+- xclip (or wl-clipboard), for copying from tmux and nvim to the system clipboard
 - Online installs only: `build-essential` (C compiler, libc headers, `make`)
   and the `tree-sitter` CLI, to build the treesitter parsers and
   telescope-fzf-native on first start
@@ -66,8 +67,8 @@ email.
 | | |
 |---|---|
 | **Bash** | `~/.bash/*.sh` is sourced from `.bashrc`: git aliases (`gs`, `ga`, `gc`, `gp`, `gl`, …), the `dotfiles` alias, `~/.local/bin` and `~/go/bin` on `PATH` |
-| **Git** | `main` as the default branch, nvim as the editor, rebase on pull, prune on fetch, rerere. Personal settings go in `~/.gitconfig.local` |
-| **tmux** | Prefix `Ctrl-Space`, `v`/`s` to split, `Alt-hjkl` to move between panes and Neovim splits, `Alt-HJKL` to resize, `Alt-1…9` for windows, vi copy mode, mouse on |
+| **Git** | `main` as the default branch, nvim as the editor, rebase on pull (autostashing local changes), prune on fetch, rerere, histogram diffs, zdiff3 conflict markers, the diff shown in the commit message editor. Personal settings go in `~/.gitconfig.local` |
+| **tmux** | Prefix `Ctrl-Space`, `v`/`s` to split, `Alt-hjkl` to move between panes and Neovim splits, `Alt-HJKL` to resize, `Alt-1…9` for windows, vi copy mode that also copies to the system clipboard, mouse on |
 | **Neovim** | Go IDE setup using the built-in LSP and `vim.pack`: gopls with format/organize imports on save; blink.cmp completion (LSP, paths, snippets, buffer words, `:` commands) and signature help; golangci-lint via nvim-lint; treesitter highlighting and folding; telescope; gitsigns and fugitive; nvim-dap debugging; a Go test runner (`<leader>r…`); oil file explorer. `<leader>fk` searches all keymaps |
 | **Font** | JetBrainsMono Nerd Font in `~/.local/share/fonts`, set as the GNOME Terminal font unless a custom font is already chosen |
 | **Keyboard** | Caps Lock acts as Ctrl (GNOME `xkb-options`), so `Caps+[` works as Escape. An existing Caps Lock option is left alone |
