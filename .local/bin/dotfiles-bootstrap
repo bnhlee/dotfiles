@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2329 # some functions only run indirectly: trap, replace_dir, update_release
 set -euo pipefail
 
 usage() {
     cat <<EOF
 Usage:
-  dotfiles-bootstrap                Clone the dotfiles and install extras from the internet
+  dotfiles-bootstrap                Clone (or update) the dotfiles and install or update
+                                    the extras from the internet
   dotfiles-bootstrap pack [FILE]    Build an offline package of the dotfiles, nvim plugins,
                                     treesitter parsers, language servers, delta, xcape
                                     and Nerd Font
-  dotfiles-bootstrap apply PATH     Install from an offline package, given as the .tar.gz
-                                    or the extracted dotfiles-offline directory
+  dotfiles-bootstrap apply PATH     Install or update from an offline package, given as the
+                                    .tar.gz or the extracted dotfiles-offline directory
 EOF
 }
 
@@ -28,8 +30,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# -C: git prints and takes paths relative to the work tree, wherever this runs
 dotfiles() {
-    git --git-dir="$DOTFILES_DIR" --work-tree="$HOME" "$@"
+    git -C "$HOME" --git-dir="$DOTFILES_DIR" --work-tree="$HOME" "$@"
 }
 
 clone_dotfiles() {
@@ -37,31 +40,123 @@ clone_dotfiles() {
     git -c init.defaultBranch=main clone --quiet --bare "$1" "$DOTFILES_DIR"
 }
 
-# Check out the bare repo into $HOME. Existing files in the way are replaced:
-# identical ones silently, others after moving them to ~/.dotfiles-backup.
-checkout_dotfiles() {
+# A bare clone doesn't track its remote, so plain `dotfiles pull` wouldn't
+# work. Only fills in what's unset.
+configure_dotfiles_repo() {
     dotfiles config status.showUntrackedFiles no
-    local backup="$HOME/.dotfiles-backup" f
-    local moved=()
+    local branch
+    branch=$(dotfiles symbolic-ref --short HEAD)
+    dotfiles config --get remote.origin.fetch >/dev/null \
+        || dotfiles config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+    dotfiles config --get "branch.$branch.remote" >/dev/null || {
+        dotfiles config "branch.$branch.remote" origin
+        dotfiles config "branch.$branch.merge" "refs/heads/$branch"
+    }
+}
 
-    if ! dotfiles checkout >/dev/null 2>&1; then
-        while IFS= read -r f; do
-            [ -e "$HOME/$f" ] || [ -L "$HOME/$f" ] || continue
-            if [ -f "$HOME/$f" ] && dotfiles show "HEAD:$f" | cmp -s - "$HOME/$f"; then
-                rm "$HOME/$f"
-            else
-                mkdir -p "$backup/$(dirname "$f")"
-                mv "$HOME/$f" "$backup/$f"
-                moved+=("$f")
-            fi
-        done < <(dotfiles ls-tree -r --name-only HEAD)
-        dotfiles checkout >/dev/null
+# Fast-forward the dotfiles to the current branch from $1 (a remote, or the
+# offline package's bundle). Local work is never overwritten: local commits,
+# or local edits to files the update changes, leave the repo as it is with a
+# warning. Untracked files in the way of newly added dotfiles are moved to
+# ~/.dotfiles-backup, as on the first checkout.
+update_dotfiles() {
+    local src="$1" backup="$HOME/.dotfiles-backup" branch old new f
+    local blocked=() moved=()
+    branch=$(dotfiles symbolic-ref --short HEAD)
+    if ! dotfiles fetch --quiet "$src" "$branch"; then
+        echo "Warning: couldn't fetch the dotfiles; keeping the current version." >&2
+        return 0
+    fi
+    old=$(dotfiles rev-parse HEAD)
+    new=$(dotfiles rev-parse FETCH_HEAD)
+    # Up to date, or only local commits on top
+    if dotfiles merge-base --is-ancestor "$new" "$old"; then
+        echo "Dotfiles are up to date."
+        return 0
+    fi
+    if ! dotfiles merge-base --is-ancestor "$old" "$new"; then
+        echo "Warning: local dotfiles commits have diverged from the update; not updating." \
+            "Merge or rebase them yourself (dotfiles pull)." >&2
+        return 0
+    fi
+
+    # Local edits, staged or not, to files the update changes. --no-renames
+    # throughout: with rename detection, --name-only lists only a renamed
+    # file's new path, and --diff-filter=A leaves it out.
+    while IFS= read -r -d '' f; do
+        blocked+=("$f")
+    done < <(comm -z -12 <(dotfiles diff -z --no-renames --name-only HEAD | sort -z) \
+        <(dotfiles diff -z --no-renames --name-only HEAD FETCH_HEAD | sort -z))
+    if [ ${#blocked[@]} -gt 0 ]; then
+        echo "Warning: not updating the dotfiles; the update changes files with local changes:" >&2
+        printf '  %s\n' "${blocked[@]}" >&2
+        echo "Commit or stash them (dotfiles stash), then re-run." >&2
+        return 0
+    fi
+
+    # git refuses to overwrite untracked files, even identical ones
+    while IFS= read -r -d '' f; do
+        if [ -e "$HOME/$f" ] || [ -L "$HOME/$f" ]; then
+            mkdir -p "$backup/$(dirname "$f")"
+            mv "$HOME/$f" "$backup/$f"
+            moved+=("$f")
+        fi
+    done < <(dotfiles diff -z --no-renames --name-only --diff-filter=A HEAD FETCH_HEAD)
+    if [ ${#moved[@]} -gt 0 ]; then
+        echo "These existing files were in the way of new dotfiles and were moved to $backup:"
+        printf '  %s\n' "${moved[@]}"
+    fi
+
+    if ! dotfiles merge --ff-only --quiet FETCH_HEAD; then
+        echo "Warning: couldn't update the dotfiles; keeping the current version." >&2
+        # The new dotfiles didn't arrive, so put back what was moved for them
+        for f in "${moved[@]}"; do
+            mv "$backup/$f" "$HOME/$f"
+        done
+        [ ${#moved[@]} -eq 0 ] || echo "The files moved to $backup were put back." >&2
+        return 0
+    fi
+    echo "Dotfiles updated ($(dotfiles rev-list --count "$old..$new") new commits)."
+}
+
+# Check out the bare repo into $HOME without ever deleting anything:
+# - First checkout (the bare clone has no index yet): existing files that
+#   differ from the dotfiles are moved to ~/.dotfiles-backup first.
+# - Re-runs: local changes to tracked files are left alone.
+# Either way, tracked files missing from $HOME are then written from git, so a
+# re-run also repairs deleted dotfiles. Any git error stops the script before
+# a file is touched (e.g. a stale ~/.dotfiles/index.lock from a crashed git).
+checkout_dotfiles() {
+    configure_dotfiles_repo
+    local backup="$HOME/.dotfiles-backup" f
+    local moved=() missing=()
+
+    if [ ! -f "$DOTFILES_DIR/index" ]; then
+        # Fill the index from HEAD without touching $HOME, so git can compare
+        dotfiles read-tree HEAD
+        dotfiles update-index -q --refresh || true
+        while IFS= read -r -d '' f; do
+            mkdir -p "$backup/$(dirname "$f")"
+            mv "$HOME/$f" "$backup/$f"
+            moved+=("$f")
+        done < <(dotfiles diff -z --name-only --diff-filter=MT)
+    fi
+
+    while IFS= read -r -d '' f; do
+        missing+=("$f")
+    done < <(dotfiles diff -z --name-only --diff-filter=D)
+    if [ ${#missing[@]} -gt 0 ]; then
+        # Only missing paths, so nothing existing is overwritten
+        dotfiles checkout-index -- "${missing[@]}"
     fi
 
     echo "Dotfiles checked out into $HOME."
     if [ ${#moved[@]} -gt 0 ]; then
         echo "These existing files differed from the dotfiles and were moved to $backup:"
         printf '  %s\n' "${moved[@]}"
+    fi
+    if [ -n "$(dotfiles diff --name-only)" ]; then
+        echo "Local changes to the dotfiles were kept (see: dotfiles status)."
     fi
 }
 
@@ -81,8 +176,8 @@ fix_site_links() {
     done < <(find "$site" -type l -lname '/*' -print0)
 }
 
-# Install the nvim plugins, treesitter parsers and blink.cmp's fuzzy matcher
-# now, instead of on the first interactive start
+# Install or update the nvim plugins, treesitter parsers and blink.cmp's fuzzy
+# matcher now, instead of on the first interactive start
 install_nvim_plugins() {
     if ! command -v nvim >/dev/null; then
         echo "nvim not found; plugins will install the first time it starts."
@@ -93,9 +188,28 @@ install_nvim_plugins() {
         command -v "$tool" >/dev/null || echo "Warning: $tool not found; treesitter parsers or telescope-fzf-native may fail to build." >&2
     done
 
-    echo "Installing nvim plugins and treesitter parsers (can take a few minutes)..."
+    echo "Installing and updating nvim plugins and treesitter parsers (can take a few minutes)..."
     local script
     script=$(mktemp --suffix=.lua)
+    # First pass: init.lua installs missing plugins (vim.pack.add); this moves
+    # the installed ones to the lockfile's revisions, as the dotfiles may have
+    # just updated it. The second pass then starts with the new plugin code.
+    cat >"$script" <<'EOF'
+vim.pack.update(nil, { target = "lockfile", force = true })
+-- When nvim-treesitter changes, the PackChanged hook in init.lua starts
+-- :TSUpdate. Installs of the same parser wait for each other, so this also
+-- waits for that one.
+local ok, ts = pcall(require, "nvim-treesitter")
+if ok then
+    local wait_ok, err = ts.update():pwait(10 * 60 * 1000)
+    if not wait_ok then
+        io.stderr:write("\nTreesitter update failed: " .. tostring(err) .. "\n")
+    end
+end
+vim.cmd("qa!")
+EOF
+    nvim --headless -c "luafile $script" -c 'qa!'
+
     cat >"$script" <<'EOF'
 -- init.lua has already installed the plugins (vim.pack.add) and built fzf-native
 local ok, ts = pcall(require, "plugins.treesitter")
@@ -107,13 +221,17 @@ if ok and ts.install_task then
         io.stderr:write("\nTreesitter install failed: " .. tostring(err) .. "\n")
     end
 end
--- blink.cmp's setup() starts the download; it writes v0.0.0 until the binary is verified
-local version_file = vim.fn.stdpath("data") .. "/site/pack/core/opt/blink.cmp/target/release/version"
+-- blink.cmp's setup() downloads the binary for its release tag when the
+-- installed one is missing or from another version. It writes v0.0.0 until
+-- the download is verified, then the tag.
+local blink_dir = vim.fn.stdpath("data") .. "/site/pack/core/opt/blink.cmp"
+local tag = vim.trim(vim.system({ "git", "-C", blink_dir, "describe", "--tags", "--exact-match" }):wait().stdout or "")
 local blink_ok = vim.wait(2 * 60 * 1000, function()
-    local f = io.open(version_file)
+    local f = io.open(blink_dir .. "/target/release/version")
     if not f then return false end
     local v = f:read("*l")
     f:close()
+    if tag ~= "" then return v == tag end
     return v ~= nil and v ~= "v0.0.0"
 end, 500)
 local parsers = #vim.fn.glob(vim.fn.stdpath("data") .. "/site/parser/*.so", false, true)
@@ -161,15 +279,45 @@ latest_tag() {
     curl -fsSI "$1/latest" | sed -n 's|^location:.*/tag/\([^[:space:]]*\).*|\1|Ip' | grep .
 }
 
-delta_installed() {
-    bin_runs delta || bin_runs "$DELTA_BIN"
+# Whether release tag $2 is newer than installed version $1 (either may start with v)
+newer_version() {
+    local have="${1#v}" want="${2#v}"
+    [ "$have" != "$want" ] && [ "$(printf '%s\n%s\n' "$have" "$want" | sort -V | tail -1)" = "$want" ]
 }
 
-# Download the latest delta binary for this machine to $1
+# Install a tool from its GitHub releases, or update it when there's a newer
+# release: update_release NAME RELEASES_URL INSTALLED_VERSION CMD...
+# INSTALLED_VERSION is empty when it isn't installed. CMD installs the release
+# whose tag it gets as an extra last argument. Failures are warnings.
+update_release() {
+    local name="$1" releases="$2" have="$3" tag
+    shift 3
+    if ! tag=$(latest_tag "$releases"); then
+        if [ -n "$have" ]; then
+            echo "Warning: couldn't look up the latest $name release; keeping $have." >&2
+        else
+            echo "Warning: couldn't look up the latest $name release; skipping it." >&2
+        fi
+        return 0
+    fi
+    if [ -z "$have" ]; then
+        echo "Installing $name ${tag#v}..."
+    elif newer_version "$have" "$tag"; then
+        echo "Updating $name $have -> ${tag#v}..."
+    else
+        return 0
+    fi
+    "$@" "$tag" || echo "Warning: couldn't install $name ${tag#v}." >&2
+}
+
+# Version of the delta at $1, empty if there's none
+delta_version() {
+    "$1" --version 2>/dev/null | sed -n 's/^delta //p' || true
+}
+
+# Download delta release $2 for this machine to $1
 download_delta() {
-    local tag
-    tag=$(latest_tag "$DELTA_RELEASES") || return 1
-    local tmp status=0
+    local tag="$2" tmp status=0
     tmp=$(mktemp -d)
     curl -fsSL "$DELTA_RELEASES/download/$tag/delta-$tag-$(uname -m)-unknown-linux-gnu.tar.gz" \
         | tar xz -C "$tmp" --strip-components=1 --wildcards '*/delta' \
@@ -177,7 +325,7 @@ download_delta() {
         && install -D -m 755 "$tmp/delta" "$1" \
         || status=1
     rm -rf "$tmp"
-    return $status
+    return "$status"
 }
 
 # Language servers for nvim (see ~/.config/nvim/lsp/): bash (plus shellcheck,
@@ -216,7 +364,7 @@ replace_dir() {
         status=1
     fi
     rm -rf "$tmp"
-    return $status
+    return "$status"
 }
 
 npm_servers_installed() {
@@ -225,68 +373,96 @@ npm_servers_installed() {
         && [ -f "$1/node/node_modules/typescript/lib/tsserver.js" ]
 }
 
-# Into $1/node/node_modules. Pure JS (bash-language-server's parser is wasm),
-# so the result runs on any architecture.
+# Into $1/node_modules. Pure JS (bash-language-server's parser is wasm), so
+# the result runs on any architecture. .servers records the pins it used.
 fetch_npm_servers() {
-    npm install --prefix "$1" --no-fund --no-audit --loglevel=error "${NPM_SERVERS[@]}"
+    # stdout is just "added N packages"; errors go to stderr
+    npm install --prefix "$1" --no-fund --no-audit --loglevel=error "${NPM_SERVERS[@]}" >/dev/null \
+        && echo "${NPM_SERVERS[*]}" >"$1/.servers"
 }
 
+# Whether the npm servers in $1 need (re)installing: missing, installed with
+# other NPM_SERVERS pins, or with updates within their pins (npm's "wanted";
+# its "latest" can be a new major, like TypeScript 7). If npm can't check,
+# for example offline, they count as up to date.
+npm_servers_outdated() {
+    npm_servers_installed "$1" || return 0
+    [ "$(cat "$1/node/.servers" 2>/dev/null)" = "${NPM_SERVERS[*]}" ] || return 0
+    local outdated
+    # Exits 1 when anything has a newer version, wanted or not
+    outdated=$(npm outdated --prefix "$1/node" --json 2>/dev/null || true)
+    printf '%s' "$outdated" | node -e '
+        let json = "";
+        process.stdin.on("data", (d) => (json += d)).on("end", () => {
+            let pkgs = {};
+            try { pkgs = JSON.parse(json); } catch {}
+            const stale = Object.values(pkgs).some((p) => p && p.current && p.wanted && p.current !== p.wanted);
+            process.exit(stale ? 0 : 1);
+        });'
+}
+
+# Installed versions, empty when not installed
+lua_ls_version() {
+    "$1/bin/lua-language-server" --version 2>/dev/null || true
+}
+
+shellcheck_version() {
+    "$1/shellcheck" --version 2>/dev/null | sed -n 's/^version: //p' || true
+}
+
+pses_version() {
+    sed -n "s/^ *ModuleVersion *= *'\([^']*\)'.*/\1/p" \
+        "$1/PowerShellEditorServices/PowerShellEditorServices.psd1" 2>/dev/null || true
+}
+
+# Release $1 into directory $2
 fetch_lua_ls() {
-    local tag
-    tag=$(latest_tag "$LUA_LS_RELEASES") || return 1
-    curl -fsSL "$LUA_LS_RELEASES/download/$tag/lua-language-server-$tag-linux-$(release_arch).tar.gz" \
-        | tar xz -C "$1" \
-        && bin_runs "$1/bin/lua-language-server"
+    curl -fsSL "$LUA_LS_RELEASES/download/$1/lua-language-server-$1-linux-$(release_arch).tar.gz" \
+        | tar xz -C "$2" \
+        && bin_runs "$2/bin/lua-language-server"
 }
 
 # A static binary, named for uname -m
 fetch_shellcheck() {
-    local tag
-    tag=$(latest_tag "$SHELLCHECK_RELEASES") || return 1
-    curl -fsSL "$SHELLCHECK_RELEASES/download/$tag/shellcheck-$tag.linux.$(uname -m).tar.gz" \
-        | tar xz -C "$1" --strip-components=1 \
-        && bin_runs "$1/shellcheck"
+    curl -fsSL "$SHELLCHECK_RELEASES/download/$1/shellcheck-$1.linux.$(uname -m).tar.gz" \
+        | tar xz -C "$2" --strip-components=1 \
+        && bin_runs "$2/shellcheck"
 }
 
 fetch_pses() {
-    curl -fsSL "$PSES_RELEASES/latest/download/PowerShellEditorServices.zip" -o "$1/pses.zip" \
+    curl -fsSL "$PSES_RELEASES/download/$1/PowerShellEditorServices.zip" -o "$2/pses.zip" \
         || return 1
     if command -v unzip >/dev/null; then
-        unzip -q "$1/pses.zip" -d "$1"
+        unzip -q "$2/pses.zip" -d "$2"
     else
-        python3 -m zipfile -e "$1/pses.zip" "$1"
-    fi && rm "$1/pses.zip" \
-        && [ -f "$1/PowerShellEditorServices/Start-EditorServices.ps1" ]
+        python3 -m zipfile -e "$2/pses.zip" "$2"
+    fi && rm "$2/pses.zip" \
+        && [ -f "$2/PowerShellEditorServices/Start-EditorServices.ps1" ]
 }
 
-# Download whichever language servers are missing from $1 (an LSP_DIR layout).
+# Install the language servers into $1 (an LSP_DIR layout), or update them:
+# the npm ones within their pinned majors, the others to their latest release.
 # Failures are warnings: nvim only enables the servers it finds.
-install_lsp_servers() {
+update_lsp_servers() {
     local dir="$1"
-    if ! npm_servers_installed "$dir"; then
-        if command -v npm >/dev/null; then
-            echo "Installing bash and JS/TS language servers..."
-            replace_dir "$dir/node" fetch_npm_servers \
-                || echo "Warning: couldn't install the bash and JS/TS language servers." >&2
+    if ! command -v npm >/dev/null; then
+        npm_servers_installed "$dir" \
+            || echo "Warning: npm not found; skipping the bash and JS/TS language servers." >&2
+    elif npm_servers_outdated "$dir"; then
+        if npm_servers_installed "$dir"; then
+            echo "Updating the bash and JS/TS language servers..."
         else
-            echo "Warning: npm not found; skipping the bash and JS/TS language servers." >&2
+            echo "Installing the bash and JS/TS language servers..."
         fi
+        replace_dir "$dir/node" fetch_npm_servers \
+            || echo "Warning: couldn't install the bash and JS/TS language servers." >&2
     fi
-    if ! bin_runs "$dir/lua-language-server/bin/lua-language-server"; then
-        echo "Installing lua-language-server..."
-        replace_dir "$dir/lua-language-server" fetch_lua_ls \
-            || echo "Warning: couldn't install lua-language-server." >&2
-    fi
-    if ! bin_runs "$dir/shellcheck/shellcheck"; then
-        echo "Installing shellcheck..."
-        replace_dir "$dir/shellcheck" fetch_shellcheck \
-            || echo "Warning: couldn't install shellcheck." >&2
-    fi
-    if [ ! -f "$dir/pses/PowerShellEditorServices/Start-EditorServices.ps1" ]; then
-        echo "Installing PowerShellEditorServices..."
-        replace_dir "$dir/pses" fetch_pses \
-            || echo "Warning: couldn't install PowerShellEditorServices." >&2
-    fi
+    update_release lua-language-server "$LUA_LS_RELEASES" "$(lua_ls_version "$dir/lua-language-server")" \
+        replace_dir "$dir/lua-language-server" fetch_lua_ls
+    update_release shellcheck "$SHELLCHECK_RELEASES" "$(shellcheck_version "$dir/shellcheck")" \
+        replace_dir "$dir/shellcheck" fetch_shellcheck
+    update_release PowerShellEditorServices "$PSES_RELEASES" "$(pses_version "$dir/pses")" \
+        replace_dir "$dir/pses" fetch_pses
 }
 
 # Link the servers into ~/.local/bin. Files there that aren't
@@ -343,10 +519,6 @@ set_caps_ctrl() {
 XCAPE_BIN="$HOME/.local/bin/xcape"
 XCAPE_AUTOSTART="$HOME/.config/autostart/xcape.desktop"
 
-xcape_installed() {
-    bin_runs xcape || bin_runs "$XCAPE_BIN"
-}
-
 # Download xcape for this machine to $1
 download_xcape() {
     command -v apt-get >/dev/null && command -v dpkg-deb >/dev/null || return 1
@@ -358,7 +530,23 @@ download_xcape() {
         && install -D -m 755 "$tmp/root/usr/bin/xcape" "$1" \
         || status=1
     rm -rf "$tmp"
-    return $status
+    return "$status"
+}
+
+# Install or update xcape at $1. It rarely changes, so fetching the 11K
+# package and comparing is simpler than tracking versions.
+update_xcape() {
+    local tmp
+    tmp=$(mktemp -d)
+    if download_xcape "$tmp/xcape"; then
+        if ! cmp -s "$tmp/xcape" "$1"; then
+            if [ -e "$1" ]; then echo "Updating xcape..."; else echo "Installing xcape..."; fi
+            install -D -m 755 "$tmp/xcape" "$1"
+        fi
+    elif [ ! -e "$1" ]; then
+        echo "Note: couldn't install xcape (needs apt and X11 libraries); skipping." >&2
+    fi
+    rm -rf "$tmp"
 }
 
 # Start xcape at login, when Caps Lock is Ctrl (set_caps_ctrl). Otherwise a
@@ -396,6 +584,24 @@ set_caps_escape() {
     echo "xcape set up: tapping Caps Lock sends Escape in X11 sessions."
 }
 
+# Install binary $2 from an offline package as $3. The package wins over what's
+# in ~/.local/bin, as it does for plugins and language servers, but a $1
+# installed elsewhere (e.g. with apt) is left alone.
+install_packaged_bin() {
+    local name="$1" src="$2" dest="$3"
+    [ -f "$src" ] || return 0
+    if [ ! -e "$dest" ] && bin_runs "$name"; then
+        return 0
+    fi
+    if ! bin_runs "$src"; then
+        echo "Note: the packaged $name won't run on this machine; skipping it." >&2
+        return 0
+    fi
+    cmp -s "$src" "$dest" && return 0
+    if [ -e "$dest" ]; then echo "Updating $name..."; else echo "Installing $name..."; fi
+    install -D -m 755 "$src" "$dest"
+}
+
 gitconfig_note() {
     if [ ! -f "$HOME/.gitconfig.local" ]; then
         echo "Note: create ~/.gitconfig.local with your [user] name and email."
@@ -403,26 +609,36 @@ gitconfig_note() {
 }
 
 bootstrap_online() {
-    if [ ! -d "$DOTFILES_DIR" ]; then
+    if [ -d "$DOTFILES_DIR" ]; then
+        checkout_dotfiles
+        local old
+        old=$(dotfiles rev-parse HEAD)
+        update_dotfiles origin
+        # Carry on with the updated version of this script, if it changed
+        if [ -z "${DOTFILES_BOOTSTRAP_UPDATED:-}" ] \
+            && ! dotfiles diff --quiet "$old" HEAD -- .local/bin/dotfiles-bootstrap; then
+            echo "Continuing with the updated dotfiles-bootstrap..."
+            DOTFILES_BOOTSTRAP_UPDATED=1 exec "$HOME/.local/bin/dotfiles-bootstrap"
+        fi
+    else
         clone_dotfiles "$DOTFILES_REPO"
+        checkout_dotfiles
     fi
-    checkout_dotfiles
 
     if ! font_installed; then
         echo "Installing ${NERD_FONT} Nerd Font..."
         download_font "$FONT_DIR"
         fc-cache -f
     fi
-    if ! delta_installed; then
-        echo "Installing delta..."
-        download_delta "$DELTA_BIN" || echo "Warning: couldn't install delta; git will use less." >&2
+    # Ours to update are the ones in ~/.local/bin; one installed elsewhere
+    # (e.g. with apt) is left alone
+    if [ -e "$DELTA_BIN" ] || ! bin_runs delta; then
+        update_release delta "$DELTA_RELEASES" "$(delta_version "$DELTA_BIN")" download_delta "$DELTA_BIN"
     fi
-    install_lsp_servers "$LSP_DIR"
+    update_lsp_servers "$LSP_DIR"
     link_lsp_bins
-    if ! xcape_installed; then
-        echo "Installing xcape..."
-        download_xcape "$XCAPE_BIN" \
-            || echo "Note: couldn't install xcape (needs apt and X11 libraries); skipping." >&2
+    if [ -e "$XCAPE_BIN" ] || ! bin_runs xcape; then
+        update_xcape "$XCAPE_BIN"
     fi
     set_terminal_font
     set_caps_ctrl
@@ -462,32 +678,29 @@ pack() {
         fi
     fi
 
-    # Starts from the installed servers and downloads whatever's missing
+    # The servers, delta and xcape start from the installed copies, which are
+    # then updated or downloaded like an online install would
     echo "Packing language servers..."
     if [ -d "$LSP_DIR" ]; then
         cp -a "$LSP_DIR" "$root/lsp"
     fi
-    install_lsp_servers "$root/lsp"
+    update_lsp_servers "$root/lsp"
 
     echo "Packing delta..."
     if bin_runs "$DELTA_BIN"; then
         cp "$DELTA_BIN" "$root/delta"
     elif bin_runs delta; then
         cp "$(command -v delta)" "$root/delta"
-    elif ! download_delta "$root/delta"; then
-        rm -f "$root/delta"
-        echo "Warning: couldn't download delta and it isn't installed; skipping." >&2
     fi
+    update_release delta "$DELTA_RELEASES" "$(delta_version "$root/delta")" download_delta "$root/delta"
 
     echo "Packing xcape..."
     if bin_runs "$XCAPE_BIN"; then
         cp "$XCAPE_BIN" "$root/xcape"
     elif bin_runs xcape; then
         cp "$(command -v xcape)" "$root/xcape"
-    elif ! download_xcape "$root/xcape"; then
-        rm -f "$root/xcape"
-        echo "Warning: couldn't download xcape (needs apt) and it isn't installed; skipping." >&2
     fi
+    update_xcape "$root/xcape"
 
     cp -a "$(realpath "${BASH_SOURCE[0]}")" "$root/dotfiles-bootstrap"
     {
@@ -513,6 +726,8 @@ apply() {
         root="$STAGE/dotfiles-offline"
     fi
     [ -f "$root/MANIFEST" ] || { echo "Not an offline package: $src" >&2; exit 1; }
+    # The dotfiles function runs git from $HOME
+    root=$(realpath "$root")
     cat "$root/MANIFEST"
 
     # Parsers and fzf-native are compiled binaries
@@ -524,13 +739,14 @@ apply() {
     fi
 
     if [ -d "$DOTFILES_DIR" ]; then
-        echo "$DOTFILES_DIR already exists; leaving the repo as is."
+        checkout_dotfiles
+        update_dotfiles "$root/dotfiles.bundle"
     else
         clone_dotfiles "$root/dotfiles.bundle"
         # Pull/push from GitHub later, when there's internet
         dotfiles remote set-url origin "$DOTFILES_REPO"
+        checkout_dotfiles
     fi
-    checkout_dotfiles
 
     if [ -d "$root/nvim-site" ]; then
         echo "Installing nvim plugins and treesitter parsers..."
@@ -552,14 +768,7 @@ apply() {
         tar xJf "$root/font.tar.xz" -C "$FONT_DIR"
         fc-cache -f
     fi
-    if ! delta_installed && [ -f "$root/delta" ]; then
-        if bin_runs "$root/delta"; then
-            echo "Installing delta..."
-            install -D -m 755 "$root/delta" "$DELTA_BIN"
-        else
-            echo "Warning: packaged delta won't run on this machine; git will use less." >&2
-        fi
-    fi
+    install_packaged_bin delta "$root/delta" "$DELTA_BIN"
 
     if [ -d "$root/lsp" ]; then
         echo "Installing language servers..."
@@ -579,14 +788,7 @@ apply() {
     fi
     link_lsp_bins
 
-    if ! xcape_installed && [ -f "$root/xcape" ]; then
-        if bin_runs "$root/xcape"; then
-            echo "Installing xcape..."
-            install -D -m 755 "$root/xcape" "$XCAPE_BIN"
-        else
-            echo "Note: packaged xcape won't run here (no X11 libraries?); skipping." >&2
-        fi
-    fi
+    install_packaged_bin xcape "$root/xcape" "$XCAPE_BIN"
     set_terminal_font
     set_caps_ctrl
     set_caps_escape
@@ -594,10 +796,15 @@ apply() {
     gitconfig_note
 }
 
-case "${1:-}" in
-    "") bootstrap_online ;;
-    pack) shift; pack "$@" ;;
-    apply) shift; apply "$@" ;;
-    -h | --help | help) usage ;;
-    *) usage >&2; exit 1 ;;
-esac
+main() {
+    case "${1:-}" in
+        "") bootstrap_online ;;
+        pack) shift; pack "$@" ;;
+        apply) shift; apply "$@" ;;
+        -h | --help | help) usage ;;
+        *) usage >&2; exit 1 ;;
+    esac
+}
+
+# On one line, so bash has read all of it before an update can rewrite this file
+main "$@"; exit
