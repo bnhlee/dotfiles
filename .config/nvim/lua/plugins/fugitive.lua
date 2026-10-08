@@ -13,6 +13,9 @@ map("<leader>gP", "<cmd>Git pull --rebase<cr>", "Git pull")
 map("<leader>gb", "<cmd>Git blame<cr>", "Git blame file")
 map("<leader>gd", "<cmd>Gvdiffsplit<cr>", "Diff file against index")
 map("<leader>gw", "<cmd>Gwrite<cr>", "Stage file")
-map("<leader>gl", builtin.git_commits, "Git log")
-map("<leader>gL", builtin.git_bcommits, "Git log for file")
-map("<leader>gB", builtin.git_branches, "Git branches")
+-- Telescope's git pickers default to nvim's working directory, so run them
+-- from the current buffer's repo instead
+local in_project = require("config.root").in_project
+map("<leader>gl", in_project(builtin.git_commits, "Git Log"), "Git log")
+map("<leader>gL", in_project(builtin.git_bcommits, "Git Log (file)"), "Git log for file")
+map("<leader>gB", in_project(builtin.git_branches, "Git Branches"), "Git branches")

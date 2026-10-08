@@ -19,4 +19,12 @@ function M.get()
     return dir and (vim.fs.root(dir, ".git") or dir) or vim.fn.getcwd()
 end
 
+-- Wrap a telescope picker so it runs from the project root, wherever nvim was started
+function M.in_project(picker, title)
+    return function()
+        local dir = M.get()
+        picker({ cwd = dir, prompt_title = ("%s (%s)"):format(title, vim.fs.basename(dir)) })
+    end
+end
+
 return M

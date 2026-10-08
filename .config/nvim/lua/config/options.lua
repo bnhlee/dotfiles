@@ -16,9 +16,7 @@ vim.opt.relativenumber = true
 
 vim.opt.expandtab = true
 vim.opt.shiftwidth = 4
-vim.opt.smartindent = true
 
-vim.opt.hlsearch = true
 -- Case-insensitive search, unless the pattern has a capital letter
 vim.opt.ignorecase = true
 vim.opt.smartcase = true
@@ -33,6 +31,8 @@ vim.opt.wrap = false
 
 -- Keep undo history after closing a file
 vim.opt.undofile = true
+-- No swap files (avoids the swap prompt); unsaved changes are lost on a crash
+vim.opt.swapfile = false
 -- Yank and paste through the system clipboard (uses xclip / wl-copy)
 vim.opt.clipboard = "unnamedplus"
 

@@ -24,6 +24,7 @@ vim.pack.add({
     { src = "https://github.com/nvim-telescope/telescope-fzf-native.nvim", },
     { src = "https://github.com/nvim-treesitter/nvim-treesitter", version = "main", },
     { src = "https://github.com/lewis6991/gitsigns.nvim", },
+    { src = "https://github.com/lewis6991/satellite.nvim", },
     -- Pinned to releases so blink can download its prebuilt fuzzy matcher
     { src = "https://github.com/saghen/blink.cmp", version = vim.version.range("1") },
     { src = "https://github.com/tpope/vim-fugitive", },
@@ -37,6 +38,7 @@ require("plugins.oil")
 require("plugins.telescope")
 require("plugins.treesitter")
 require("plugins.gitsigns")
+require("plugins.satellite")
 require("plugins.fugitive")
 require("plugins.dap")
 require("plugins.lint")
