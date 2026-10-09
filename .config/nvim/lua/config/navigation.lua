@@ -12,6 +12,24 @@ function M.navigate(dir)
     end
 end
 
+-- From the command line (an unmapped Alt-key acts like <Esc> there and throws
+-- the line away). Going to a tmux pane leaves the command line open, so it's
+-- still there on the way back. Moving to a split has to close it, so the line
+-- is saved to history first: : then <Up> brings it back.
+function M.navigate_cmdline(dir)
+    if vim.fn.winnr(dir) == vim.fn.winnr() then
+        if vim.env.TMUX then
+            vim.system({ "tmux", "select-pane", "-" .. tmux_direction[dir] })
+        end
+        return ""
+    end
+    local line = vim.fn.getcmdline()
+    if line ~= "" then
+        vim.fn.histadd(vim.fn.getcmdtype(), line)
+    end
+    return "<C-c><Cmd>lua require('config.navigation').navigate('" .. dir .. "')<CR>"
+end
+
 for dir in pairs(tmux_direction) do
     local lhs = "<M-" .. dir .. ">"
     local desc = "Move to split or tmux pane"
@@ -20,6 +38,8 @@ for dir in pairs(tmux_direction) do
     vim.keymap.set({ "i", "t" }, lhs,
         "<C-\\><C-n><Cmd>lua require('config.navigation').navigate('" .. dir .. "')<CR>",
         { desc = desc })
+    vim.keymap.set("c", lhs, function() return M.navigate_cmdline(dir) end,
+        { expr = true, desc = desc })
 end
 
 return M

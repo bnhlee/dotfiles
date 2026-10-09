@@ -6,7 +6,8 @@ local function map(lhs, rhs, desc)
     vim.keymap.set("n", lhs, rhs, { desc = desc })
 end
 
-map("<leader>gg", "<cmd>Git<cr>", "Git status (fugitive)")
+-- In its own tab, so cc's commit split doesn't squeeze the editing windows
+map("<leader>gg", "<cmd>tab Git<cr>", "Git status (fugitive)")
 map("<leader>gc", "<cmd>Git commit<cr>", "Git commit")
 map("<leader>gp", "<cmd>Git push<cr>", "Git push")
 map("<leader>gP", "<cmd>Git pull --rebase<cr>", "Git pull")

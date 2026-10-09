@@ -7,6 +7,16 @@ for _, name in ipairs({ "gopls", "bashls", "lua_ls", "ts_ls", "powershell_es" })
     end
 end
 
+-- Tell servers about files changed on disk outside nvim (git checkout, a
+-- rename in the shell), so e.g. gopls sees renamed or new files. Off by default
+-- on Linux because the fallback watcher is too limited; inotifywait (from
+-- inotify-tools) makes it reliable.
+if vim.fn.executable("inotifywait") == 1 then
+    vim.lsp.config("*", {
+        capabilities = { workspace = { didChangeWatchedFiles = { dynamicRegistration = true } } },
+    })
+end
+
 -- Servers whose formatting runs on save. The others format with gq, so their
 -- formatters don't rewrite files that follow a different style.
 local format_on_save = { gopls = true }

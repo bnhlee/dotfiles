@@ -33,6 +33,17 @@ vim.opt.wrap = false
 vim.opt.undofile = true
 -- No swap files (avoids the swap prompt); unsaved changes are lost on a crash
 vim.opt.swapfile = false
+-- Reload open files changed on disk (e.g. by git checkout) when coming back to
+-- nvim or switching buffers, including from a :Term inside nvim. 'autoread'
+-- (on by default) reloads them without asking if they have no unsaved edits.
+vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter", "TermLeave" }, {
+    group = vim.api.nvim_create_augroup("checktime", { clear = true }),
+    callback = function()
+        if vim.fn.getcmdwintype() == "" then
+            vim.cmd.checktime()
+        end
+    end,
+})
 -- Yank and paste through the system clipboard (uses xclip / wl-copy)
 vim.opt.clipboard = "unnamedplus"
 
