@@ -29,8 +29,24 @@ vim.opt.splitbelow = true
 
 vim.opt.wrap = false
 
+-- Column markers at 80 and 120, only in file buffers: help, oil, terminals,
+-- quickfix and other special buffers (any 'buftype') don't get them
+vim.opt.colorcolumn = "80,120"
+vim.api.nvim_create_autocmd({ "BufWinEnter", "FileType", "TermOpen" }, {
+    group = vim.api.nvim_create_augroup("colorcolumn", { clear = true }),
+    callback = function()
+        if vim.bo.buftype ~= "" then
+            vim.opt_local.colorcolumn = ""
+        end
+    end,
+})
+
 -- Keep undo history after closing a file
 vim.opt.undofile = true
+-- :Undotree (or <leader>u) browses that history as a tree, including the
+-- branches plain u / <C-r> can't reach; moving the cursor in it restores that state
+vim.cmd.packadd("nvim.undotree")
+vim.keymap.set("n", "<leader>u", "<cmd>Undotree<cr>", { desc = "Toggle undo tree" })
 -- No swap files (avoids the swap prompt); unsaved changes are lost on a crash
 vim.opt.swapfile = false
 -- Reload open files changed on disk (e.g. by git checkout) when coming back to
@@ -60,4 +76,18 @@ vim.opt.foldtext = ""
 -- Built-in colorscheme (:Telescope colorscheme enable_preview=true to browse others)
 -- Always dark, rather than following the terminal's detected background
 vim.opt.background = "dark"
+-- Let the terminal's background show through. The colorscheme resets these
+-- groups whenever it loads, so they're cleared again after every load. Floats
+-- keep theirs, so popups stay readable over the text.
+vim.api.nvim_create_autocmd("ColorScheme", {
+    group = vim.api.nvim_create_augroup("transparent_bg", { clear = true }),
+    callback = function()
+        for _, name in ipairs({ "Normal", "NormalNC", "SignColumn", "EndOfBuffer", "FoldColumn" }) do
+            -- nvim_set_hl replaces the whole group, so keep its other attributes
+            local hl = vim.api.nvim_get_hl(0, { name = name, link = false })
+            hl.bg, hl.ctermbg = nil, nil
+            vim.api.nvim_set_hl(0, name, hl)
+        end
+    end,
+})
 vim.cmd.colorscheme("catppuccin")

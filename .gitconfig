@@ -10,6 +10,7 @@
 [delta]
     # n / N jump between files in a diff
     navigate = true
+    line-numbers = true
 [pull]
     rebase = true
 [fetch]

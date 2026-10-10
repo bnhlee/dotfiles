@@ -22,8 +22,8 @@ curl -fsSL https://raw.githubusercontent.com/bnhlee/dotfiles/main/.local/bin/dot
 ```
 
 This clones the repo, checks it out into `$HOME` (existing files that differ
-are moved to `~/.dotfiles-backup`), installs the Nerd Font, delta, xcape and
-the language servers, applies the GNOME settings below, and installs the Neovim
+are moved to `~/.dotfiles-backup`), installs the Nerd Font, delta, xcape, the
+language servers and the tmux plugins, applies the GNOME settings below, and installs the Neovim
 plugins and treesitter parsers, so nvim is ready on first start.
 
 ### Without internet
@@ -42,9 +42,10 @@ dotfiles-offline/dotfiles-bootstrap apply dotfiles-offline
 ```
 
 The package contains the repo (committed changes only), the Neovim plugins and
-compiled treesitter parsers, the language servers, the font, and the delta
-and xcape binaries. The compiled parts only run on the same CPU architecture as
-the machine that built the package.
+compiled treesitter parsers, the language servers, the tmux plugins, the font,
+and the delta and xcape binaries. The compiled parts only run on the same CPU architecture as
+the machine that built the package. If a tmux plugin is neither installed nor
+downloadable, no package is created.
 
 After either install, create `~/.gitconfig.local` with your `[user]` name and
 email.
@@ -59,11 +60,11 @@ package. Either one:
   Untracked files in the way of new dotfiles go to `~/.dotfiles-backup`.
 - Restores tracked files missing from `$HOME`.
 - Online: moves the Neovim plugins to the revisions in the lockfile, updates
-  delta, xcape and the language servers (the npm ones within their pinned
+  delta, xcape, the tmux plugins and the language servers (the npm ones within their pinned
   major versions), and continues with the updated bootstrap script if it
   changed.
-- Offline: installs the package's plugins, language servers, delta and xcape
-  over the current ones. Copies installed elsewhere, e.g. with apt, are left
+- Offline: installs the package's nvim and tmux plugins, language servers,
+  delta and xcape over the current ones. Copies installed elsewhere, e.g. with apt, are left
   alone.
 
 ## Requirements
@@ -87,10 +88,10 @@ package. Either one:
 
 | | |
 |---|---|
-| **Bash** | `~/.bash/*.sh` is sourced from `.bashrc`: git aliases (`gs`, `ga`, `gc`, `gp`, `gl`, …), the `dotfiles` alias with git's tab completion, `~/.local/bin` and `~/go/bin` on `PATH`. History is written after every command, so new shells and tmux panes see it |
-| **Git** | `main` as the default branch, nvim as the editor, rebase on pull (autostashing local changes), prune on fetch, rerere (staging replayed resolutions), histogram diffs with moved lines highlighted (zebra), zdiff3 conflict markers, [delta](https://github.com/dandavison/delta) as the pager (`n`/`N` jump between files; falls back to less), the diff shown in the commit message editor. Personal settings go in `~/.gitconfig.local` |
-| **tmux** | Prefix `Ctrl-Space`, `v`/`s` to split, `Alt-hjkl` to move between panes and Neovim splits, `Alt-HJKL` to resize, `Alt-1…9` for windows, vi copy mode that also copies to the system clipboard, mouse on |
+| **Bash** | `~/.bash/*.sh` is sourced from `.bashrc`: git aliases (`gs`, `ga`, `gc`, `gp`, `gl`, …, and `gdw` for a side-by-side diff), `clip` to copy stdin to the system clipboard, the `dotfiles` alias with git's tab completion, `~/.local/bin` and `~/go/bin` on `PATH`. History is written after every command, so new shells and tmux panes see it |
+| **Git** | `main` as the default branch, nvim as the editor, rebase on pull (autostashing local changes), prune on fetch, rerere (staging replayed resolutions), histogram diffs with moved lines highlighted (zebra), zdiff3 conflict markers, [delta](https://github.com/dandavison/delta) as the pager with line numbers (`n`/`N` jump between files; falls back to less), the diff shown in the commit message editor. Personal settings go in `~/.gitconfig.local` |
+| **tmux** | Prefix `Ctrl-Space`, `v`/`s` to split, `Alt-hjkl` to move between panes and Neovim splits, `Alt-HJKL` to resize, `Alt-1…9` for windows, vi copy mode that also copies to the system clipboard, mouse on. Sessions are saved every 15 minutes and restored when tmux starts ([tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect) and [tmux-continuum](https://github.com/tmux-plugins/tmux-continuum)); `prefix Ctrl-s` saves now, `prefix Ctrl-r` restores |
 | **Language servers** | Installed to `~/.local/share/lsp` and linked into `~/.local/bin`: bash-language-server with shellcheck, lua-language-server, typescript-language-server (with TypeScript 6, or the project's own), and PowerShellEditorServices with PSScriptAnalyzer (run by the system's pwsh). Re-running the bootstrap updates them |
-| **Neovim** | Go IDE setup using the built-in LSP and `vim.pack`: gopls with format/organize imports on save; LSP for bash, Lua (aware of the `vim` API and plugins when editing this config), JS/TS and PowerShell, each enabled only if installed and formatted with `gq`; blink.cmp completion (LSP, paths, snippets, buffer words, `:` commands) and signature help; golangci-lint via nvim-lint; treesitter highlighting and folding; telescope; gitsigns and fugitive; nvim-dap debugging; a Go test runner (`<leader>r…`); oil file explorer. `<leader>fk` searches all keymaps. Splits open right/below, and `:s` previews its changes live |
+| **Neovim** | Go IDE setup using the built-in LSP and `vim.pack`: gopls with format/organize imports on save; LSP for bash, Lua (aware of the `vim` API and plugins when editing this config), JS/TS and PowerShell, each enabled only if installed and formatted with `gq`; blink.cmp completion (LSP, paths, snippets, buffer words, `:` commands) and signature help; golangci-lint via nvim-lint; treesitter highlighting and folding; telescope; gitsigns and fugitive; nvim-dap debugging; a Go test runner (`<leader>r…`); oil file explorer; the built-in undo tree (`<leader>u`). A statusline with the git branch and changes, diagnostics and attached language servers; transparent background, so the terminal's shows through; column markers at 80 and 120. `<leader>fk` searches all keymaps. Splits open right/below, and `:s` previews its changes live |
 | **Font** | JetBrainsMono Nerd Font in `~/.local/share/fonts`, set as the GNOME Terminal font unless a custom font is already chosen |
 | **Keyboard** | Caps Lock acts as Ctrl (GNOME `xkb-options`), so `Caps+[` works as Escape. An existing Caps Lock option is left alone. In X11 sessions, [xcape](https://github.com/alols/xcape) also makes a tap of Caps Lock send Escape (autostarted from `~/.config/autostart/xcape.desktop`). It's installed from the Debian package without root, so it needs apt; under Wayland it doesn't run |

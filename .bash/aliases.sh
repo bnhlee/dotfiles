@@ -1,5 +1,8 @@
 alias dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 
+# Copy stdin to the system clipboard (clip -o pastes it), like tmux and nvim do
+alias clip='xclip -selection clipboard'
+
 # Git
 alias gs='git status'
 alias ga='git add'
@@ -8,6 +11,8 @@ alias gp='git push'
 alias gf='git fetch'
 alias gd='git diff'
 alias gl='git log --oneline --decorate --graph --all'
+# Side by side; too cramped for a narrow pane, so not the default
+alias gdw='DELTA_FEATURES=+side-by-side git diff'
 
 alias gco='git checkout'
 
@@ -23,6 +28,7 @@ if declare -F __git_complete >/dev/null; then
     __git_complete gp _git_push
     __git_complete gf _git_fetch
     __git_complete gd _git_diff
+    __git_complete gdw _git_diff
     __git_complete gl _git_log
     __git_complete gco _git_checkout
 fi

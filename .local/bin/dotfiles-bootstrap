@@ -8,8 +8,8 @@ Usage:
   dotfiles-bootstrap                Clone (or update) the dotfiles and install or update
                                     the extras from the internet
   dotfiles-bootstrap pack [FILE]    Build an offline package of the dotfiles, nvim plugins,
-                                    treesitter parsers, language servers, delta, xcape
-                                    and Nerd Font
+                                    treesitter parsers, language servers, delta, xcape,
+                                    tmux plugins and Nerd Font
   dotfiles-bootstrap apply PATH     Install or update from an offline package, given as the
                                     .tar.gz or the extracted dotfiles-offline directory
 EOF
@@ -549,6 +549,28 @@ update_xcape() {
     rm -rf "$tmp"
 }
 
+# tmux plugins for session persistence, loaded by ~/.tmux.conf when present.
+# Plain git checkouts; no plugin manager needed for two plugins.
+TMUX_PLUGIN_DIR="$HOME/.tmux/plugins"
+TMUX_PLUGINS=(tmux-plugins/tmux-resurrect tmux-plugins/tmux-continuum)
+
+# Install or update the tmux plugins in $1
+update_tmux_plugins() {
+    local repo dir
+    for repo in "${TMUX_PLUGINS[@]}"; do
+        dir="$1/${repo#*/}"
+        if [ -d "$dir/.git" ]; then
+            git -C "$dir" pull --quiet --ff-only \
+                || echo "Warning: couldn't update ${repo#*/}; keeping the installed version." >&2
+        else
+            echo "Installing ${repo#*/}..."
+            mkdir -p "$1"
+            git clone --quiet --depth 1 "https://github.com/$repo.git" "$dir" \
+                || echo "Warning: couldn't install ${repo#*/}; tmux sessions won't be saved." >&2
+        fi
+    done
+}
+
 # Start xcape at login, when Caps Lock is Ctrl (set_caps_ctrl). Otherwise a
 # tap would toggle Caps Lock as well as sending Escape. The session type is
 # checked at each login, so switching between X11 and Wayland is fine.
@@ -653,6 +675,7 @@ bootstrap_online() {
     if [ -e "$XCAPE_BIN" ] || ! bin_runs xcape; then
         update_xcape "$XCAPE_BIN"
     fi
+    update_tmux_plugins "$TMUX_PLUGIN_DIR"
     set_terminal_font
     set_caps_ctrl
     set_caps_escape
@@ -715,6 +738,21 @@ pack() {
         cp "$(command -v xcape)" "$root/xcape"
     fi
     update_xcape "$root/xcape"
+
+    echo "Packing tmux plugins..."
+    if [ -d "$TMUX_PLUGIN_DIR" ]; then
+        cp -a "$TMUX_PLUGIN_DIR" "$root/tmux-plugins"
+    fi
+    update_tmux_plugins "$root/tmux-plugins"
+    # A plugin that couldn't be updated is packed as installed, but one that
+    # couldn't be downloaded at all fails the pack
+    local repo
+    for repo in "${TMUX_PLUGINS[@]}"; do
+        if [ ! -f "$root/tmux-plugins/${repo#*/}/${repo#*/tmux-}.tmux" ]; then
+            echo "Error: couldn't pack ${repo#*/}; not creating the package." >&2
+            exit 1
+        fi
+    done
 
     cp -a "$(realpath "${BASH_SOURCE[0]}")" "$root/dotfiles-bootstrap"
     {
@@ -803,6 +841,17 @@ apply() {
     link_lsp_bins
 
     install_packaged_bin xcape "$root/xcape" "$XCAPE_BIN"
+
+    if [ -d "$root/tmux-plugins" ]; then
+        echo "Installing tmux plugins..."
+        mkdir -p "$TMUX_PLUGIN_DIR"
+        # Replace each packaged plugin wholesale, like the nvim plugins
+        local tmux_plugin
+        for tmux_plugin in "$root/tmux-plugins"/*/; do
+            rm -rf "${TMUX_PLUGIN_DIR:?}/$(basename "$tmux_plugin")"
+        done
+        cp -a "$root/tmux-plugins/." "$TMUX_PLUGIN_DIR/"
+    fi
     set_terminal_font
     set_caps_ctrl
     set_caps_escape
