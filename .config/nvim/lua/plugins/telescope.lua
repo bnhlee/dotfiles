@@ -1,4 +1,17 @@
-require("telescope").setup({})
+-- Search hidden files and folders (.github, .config, ...) too, but never .git;
+-- .gitignore'd files stay out
+local skip_git = { "--hidden", "--glob", "!.git" }
+require("telescope").setup({
+    defaults = {
+        vimgrep_arguments = vim.list_extend(
+            { "rg", "--color=never", "--no-heading", "--with-filename", "--line-number", "--column", "--smart-case" },
+            skip_git
+        ),
+    },
+    pickers = {
+        find_files = { find_command = vim.list_extend({ "rg", "--files" }, skip_git) },
+    },
+})
 -- Native fzf sorter (compiled by the PackChanged hook in init.lua); falls back
 -- to the Lua sorter if the build failed
 pcall(require("telescope").load_extension, "fzf")

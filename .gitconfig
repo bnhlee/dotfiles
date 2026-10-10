@@ -21,7 +21,8 @@
 [rebase]
     autoStash = true
 [merge]
-    conflictStyle = zdiff3
+    # zdiff3 where git supports it, set in ~/.gitconfig.local by dotfiles-bootstrap
+    conflictStyle = diff3
 [diff]
     algorithm = histogram
     # Moved blocks get their own colours, alternating so adjacent moves are distinct

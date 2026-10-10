@@ -603,8 +603,21 @@ install_packaged_bin() {
 }
 
 gitconfig_note() {
-    if [ ! -f "$HOME/.gitconfig.local" ]; then
-        echo "Note: create ~/.gitconfig.local with your [user] name and email."
+    if ! git config --file "$HOME/.gitconfig.local" user.name >/dev/null; then
+        echo "Note: add your [user] name and email to ~/.gitconfig.local."
+    fi
+}
+
+# .gitconfig uses diff3 conflict markers, which every git understands. zdiff3
+# (git 2.35+) leaves out lines both sides share; older git rejects it, so it
+# goes in the untracked ~/.gitconfig.local only where git supports it.
+set_conflict_style() {
+    local version
+    version=$(git --version | sed -n 's/^git version \([0-9.]*\).*/\1/p')
+    if [ "$(printf '%s\n%s\n' 2.35 "$version" | sort -V | head -1)" = 2.35 ]; then
+        git config --file "$HOME/.gitconfig.local" merge.conflictStyle zdiff3
+    else
+        git config --file "$HOME/.gitconfig.local" --unset merge.conflictStyle || true
     fi
 }
 
@@ -644,6 +657,7 @@ bootstrap_online() {
     set_caps_ctrl
     set_caps_escape
     install_nvim_plugins
+    set_conflict_style
     gitconfig_note
 }
 
@@ -793,6 +807,7 @@ apply() {
     set_caps_ctrl
     set_caps_escape
 
+    set_conflict_style
     gitconfig_note
 }
 
