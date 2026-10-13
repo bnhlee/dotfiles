@@ -118,6 +118,41 @@ local function organize_imports(client, bufnr)
     end
 end
 
+-- grn edits every file the name is used in, opening the ones that weren't
+-- open; save those afterwards so they aren't left modified in the background.
+-- Files that were already open are left for you to save, so unrelated unsaved
+-- edits in them aren't written too.
+local rename_handler = vim.lsp.handlers["textDocument/rename"]
+vim.lsp.handlers["textDocument/rename"] = function(err, result, ctx, ...)
+    local opened = {}
+    if result then
+        local uris = vim.tbl_keys(result.changes or {})
+        for _, change in ipairs(result.documentChanges or {}) do
+            -- Only text edits; file creates/renames/deletes have nothing to save
+            if change.textDocument then
+                table.insert(uris, change.textDocument.uri)
+            end
+        end
+        for _, uri in ipairs(uris) do
+            if vim.fn.bufloaded(vim.uri_to_fname(uri)) == 0 then
+                table.insert(opened, uri)
+            end
+        end
+    end
+    rename_handler(err, result, ctx, ...)
+    for _, uri in ipairs(opened) do
+        local bufnr = vim.uri_to_bufnr(uri)
+        if vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].modified then
+            local ok, msg = pcall(vim.api.nvim_buf_call, bufnr, function()
+                vim.cmd("silent update")
+            end)
+            if not ok then
+                vim.notify("rename: couldn't save " .. vim.uri_to_fname(uri) .. ": " .. msg, vim.log.levels.WARN)
+            end
+        end
+    end
+end
+
 -- Jump to the definition, or list references when already on it (like an
 -- IDE's ctrl-click). The jump itself goes through the built-in definition, so
 -- <C-t> still returns.
@@ -140,9 +175,10 @@ local function definition_or_references()
     })
 end
 
--- Built-in defaults already cover most actions: K hover, grn rename,
--- gra code action, gri implementation, grt type definition, gO document
--- symbols, [d / ]d diagnostics, <C-w>d diagnostic float.
+-- Built-in defaults already cover most actions: K hover, grn rename (saves
+-- the files it opened, see above), gra code action, gri implementation, grt
+-- type definition, gO document symbols, [d / ]d diagnostics, <C-w>d
+-- diagnostic float.
 -- Completion and signature help come from blink.cmp (plugins/blink.lua).
 vim.api.nvim_create_autocmd("LspAttach", {
     callback = function(args)

@@ -7,6 +7,12 @@ require("telescope").setup({
             { "rg", "--color=never", "--no-heading", "--with-filename", "--line-number", "--column", "--smart-case" },
             skip_git
         ),
+        -- Alt-k scrolls results right by default; free it for pane movement
+        -- (config/navigation.lua), which keeps the picker open
+        mappings = {
+            i = { ["<M-k>"] = false },
+            n = { ["<M-k>"] = false },
+        },
     },
     pickers = {
         find_files = { find_command = vim.list_extend({ "rg", "--files" }, skip_git) },

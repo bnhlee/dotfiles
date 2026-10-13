@@ -67,6 +67,10 @@ vim.opt.clipboard = "unnamedplus"
 vim.opt.signcolumn = "yes"
 -- How long the cursor sits still before CursorHold fires (gitsigns, LSP highlights)
 vim.opt.updatetime = 250
+-- How long to wait after Esc for a following key before treating it as plain
+-- Esc. Kept short so Esc then j isn't read as Alt+j (split switch); matches
+-- tmux's escape-time
+vim.opt.ttimeoutlen = 10
 
 -- Open files with all folds open; zM closes them all, zR reopens
 vim.opt.foldlevelstart = 99

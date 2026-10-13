@@ -21,6 +21,8 @@
     autoUpdate = true
 [rebase]
     autoStash = true
+    # fixup! / squash! commits are moved into place in rebase -i
+    autoSquash = true
 [merge]
     # zdiff3 where git supports it, set in ~/.gitconfig.local by dotfiles-bootstrap
     conflictStyle = diff3
