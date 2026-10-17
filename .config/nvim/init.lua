@@ -22,6 +22,7 @@ vim.pack.add({
     { src = "https://github.com/nvim-lua/plenary.nvim", },
     { src = "https://github.com/nvim-telescope/telescope.nvim", },
     { src = "https://github.com/nvim-telescope/telescope-fzf-native.nvim", },
+    { src = "https://github.com/ThePrimeagen/harpoon", version = "harpoon2", },
     { src = "https://github.com/nvim-treesitter/nvim-treesitter", version = "main", },
     { src = "https://github.com/lewis6991/gitsigns.nvim", },
     { src = "https://github.com/lewis6991/satellite.nvim", },
@@ -36,6 +37,7 @@ vim.pack.add({
 require("plugins.icons")
 require("plugins.oil")
 require("plugins.telescope")
+require("plugins.harpoon")
 require("plugins.treesitter")
 require("plugins.gitsigns")
 require("plugins.satellite")

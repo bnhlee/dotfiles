@@ -13,3 +13,5 @@ map("<leader>se", "<C-w>=", "Make splits equal size")
 -- 'foldopen' doesn't do for commands run from a mapping
 map("n", "nzzzv", "Next match, centred")
 map("N", "Nzzzv", "Previous match, centred")
+-- Clear search highlighting (<C-l> also does, along with a redraw)
+map("<Esc>", "<cmd>nohlsearch<cr><Esc>", "Clear search highlight")
