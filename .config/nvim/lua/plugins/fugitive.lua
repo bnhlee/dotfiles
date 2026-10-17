@@ -11,7 +11,8 @@ map("<leader>gg", "<cmd>tab Git<cr>", "Git status (fugitive)")
 map("<leader>gc", "<cmd>Git commit<cr>", "Git commit")
 map("<leader>gp", "<cmd>Git push<cr>", "Git push")
 map("<leader>gP", "<cmd>Git pull --rebase<cr>", "Git pull")
-map("<leader>gb", "<cmd>Git blame<cr>", "Git blame file")
+map("<leader>gf", "<cmd>Git fetch<cr>", "Git fetch")
+map("<leader>gB", "<cmd>Git blame<cr>", "Git blame file")
 map("<leader>gd", "<cmd>Gvdiffsplit<cr>", "Diff file against index")
 map("<leader>gw", "<cmd>Gwrite<cr>", "Stage file")
 -- Telescope's git pickers default to nvim's working directory, so run them
@@ -19,7 +20,7 @@ map("<leader>gw", "<cmd>Gwrite<cr>", "Stage file")
 local in_project = require("config.root").in_project
 map("<leader>gl", in_project(builtin.git_commits, "Git Log"), "Git log")
 map("<leader>gL", in_project(builtin.git_bcommits, "Git Log (file)"), "Git log for file")
-map("<leader>gB", in_project(builtin.git_branches, "Git Branches"), "Git branches")
+map("<leader>gb", in_project(builtin.git_branches, "Git Branches"), "Git branches")
 
 -- Files changed on this branch: everything differing from where it split off
 -- the default branch (origin/HEAD, else origin's or the local main or master),
@@ -61,4 +62,4 @@ local function branch_files(opts)
     }
     builtin.find_files(opts)
 end
-map("<leader>gf", in_project(branch_files, "Branch Files"), "Files changed on branch")
+map("<leader>gF", in_project(branch_files, "Branch Files"), "Files changed on branch")
