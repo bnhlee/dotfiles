@@ -8,3 +8,8 @@ map("<leader>sh", "<cmd>split<cr>", "Split horizontally")
 map("<leader>sq", "<cmd>close<cr>", "Close split")
 map("<leader>so", "<cmd>only<cr>", "Close other splits")
 map("<leader>se", "<C-w>=", "Make splits equal size")
+
+-- Centre the screen on each search match. zv opens folds around it, which
+-- 'foldopen' doesn't do for commands run from a mapping
+map("n", "nzzzv", "Next match, centred")
+map("N", "Nzzzv", "Previous match, centred")

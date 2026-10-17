@@ -1,0 +1,4 @@
+# Global gitignore (git reads ~/.config/git/ignore by default)
+
+# Go build tags saved by nvim's :GoTags (config/gotags.lua)
+.gotags
