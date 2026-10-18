@@ -2,3 +2,6 @@
 
 # Go build tags saved by nvim's :GoTags (config/gotags.lua)
 .gotags
+
+# nvim sessions kept for tmux-resurrect (nvim's config/session.lua)
+Session.vim

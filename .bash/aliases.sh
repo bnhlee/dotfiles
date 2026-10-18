@@ -4,17 +4,25 @@ alias dotfiles='/usr/bin/git --git-dir=$HOME/.dotfiles/ --work-tree=$HOME'
 alias clip='xclip -selection clipboard'
 
 # Git
-alias gs='git status'
+# Short status with the branch and how far it is ahead of/behind upstream
+alias gs='git status -sb'
 alias ga='git add'
 alias gc='git commit'
+alias gca='git commit --amend'
+# gfix <commit>: a fixup! commit that rebase -i squashes into <commit>
+alias gfix='git commit --fixup'
 alias gp='git push'
+# Force push that refuses if the remote has commits you haven't fetched
+alias gpf='git push --force-with-lease'
 alias gf='git fetch'
 alias gd='git diff'
+alias gds='git diff --staged'
 alias gl='git log --oneline --decorate --graph --all'
 # Side by side; too cramped for a narrow pane, so not the default
 alias gdw='DELTA_FEATURES=+side-by-side git diff'
 
 alias gco='git checkout'
+alias gsw='git switch'
 
 # Tab-complete the git aliases like the commands they run. Git's completion
 # is lazy-loaded, so load it now to get __git_complete.
@@ -25,12 +33,17 @@ if declare -F __git_complete >/dev/null; then
     __git_complete gs _git_status
     __git_complete ga _git_add
     __git_complete gc _git_commit
+    __git_complete gca _git_commit
+    __git_complete gfix __git_complete_refs
     __git_complete gp _git_push
+    __git_complete gpf _git_push
     __git_complete gf _git_fetch
     __git_complete gd _git_diff
+    __git_complete gds _git_diff
     __git_complete gdw _git_diff
     __git_complete gl _git_log
     __git_complete gco _git_checkout
+    __git_complete gsw _git_switch
 fi
 
 # Complete dotfiles like git, with refs and paths from the dotfiles repo.

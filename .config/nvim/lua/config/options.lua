@@ -62,6 +62,13 @@ vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter", "TermLeave" }, {
 })
 -- Yank and paste through the system clipboard (uses xclip / wl-copy)
 vim.opt.clipboard = "unnamedplus"
+-- Briefly highlight the text just yanked
+vim.api.nvim_create_autocmd("TextYankPost", {
+    group = vim.api.nvim_create_augroup("highlight_yank", { clear = true }),
+    callback = function()
+        vim.hl.on_yank()
+    end,
+})
 
 -- Always show the sign column so git/diagnostic signs don't shift the text
 vim.opt.signcolumn = "yes"
