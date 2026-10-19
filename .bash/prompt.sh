@@ -10,7 +10,7 @@ if ! declare -F __git_ps1 >/dev/null && [ -f /usr/lib/git-core/git-sh-prompt ]; 
 fi
 GIT_PS1_SHOWDIRTYSTATE=1
 
-__prompt_branch_max=12
+__prompt_branch_max=20
 
 # Runs before each prompt, setting the variables PS1 shows. PS1 references them
 # rather than including their text, so a branch name containing $(...) or
