@@ -17,6 +17,11 @@ return {
     },
     filetypes = { "ps1" },
     root_markers = { "PSScriptAnalyzerSettings.psd1", ".git" },
+    -- Its semantic tokens outrank treesitter's highlights and color less
+    -- consistently, so leave highlighting to treesitter
+    on_init = function(client)
+        client.server_capabilities.semanticTokensProvider = nil
+    end,
     -- Read by config/lsp.lua to only enable the server when it's installed
     bundle = bundle,
 }

@@ -696,6 +696,9 @@ pack() {
     echo "Packing dotfiles repo..."
     dotfiles bundle create "$root/dotfiles.bundle" --all
 
+    # Plugins added since nvim last started (e.g. by a dotfiles pull) aren't
+    # installed yet, and the offline machine can't clone them
+    install_nvim_plugins
     if [ -d "$NVIM_SITE" ]; then
         echo "Packing nvim plugins and treesitter parsers..."
         cp -a "$NVIM_SITE" "$root/nvim-site"

@@ -28,6 +28,9 @@ vim.opt.splitright = true
 vim.opt.splitbelow = true
 
 vim.opt.wrap = false
+-- Scroll sideways before the cursor reaches the last columns, where
+-- satellite's scrollbar (plugins/satellite.lua) floats over the text
+vim.opt.sidescrolloff = 3
 
 -- Column markers at 80 and 120, only in file buffers: help, oil, terminals,
 -- quickfix and other special buffers (any 'buftype') don't get them

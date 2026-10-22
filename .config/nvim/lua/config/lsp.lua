@@ -2,7 +2,9 @@
 -- ones are enabled, so a missing server doesn't error on every file open.
 for _, name in ipairs({ "gopls", "bashls", "lua_ls", "ts_ls", "powershell_es" }) do
     local config = vim.lsp.config[name]
-    if vim.fn.executable(config.cmd[1]) == 1 and (not config.bundle or vim.uv.fs_stat(config.bundle)) then
+    -- A cmd that's a function (lsp/gopls.lua) names its program in executable
+    local program = type(config.cmd) == "table" and config.cmd[1] or config.executable
+    if vim.fn.executable(program) == 1 and (not config.bundle or vim.uv.fs_stat(config.bundle)) then
         vim.lsp.enable(name)
     end
 end
