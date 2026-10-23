@@ -16,6 +16,8 @@ require("telescope").setup({
     },
     pickers = {
         find_files = { find_command = vim.list_extend({ "rg", "--files" }, skip_git) },
+        -- Errors first, then warnings, info, hints; ties stay grouped by buffer and line
+        diagnostics = { sort_by = "severity" },
     },
 })
 -- Native fzf sorter (compiled by the PackChanged hook in init.lua); falls back
