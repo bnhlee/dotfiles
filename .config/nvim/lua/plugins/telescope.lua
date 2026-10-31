@@ -43,7 +43,43 @@ map("<leader>fo", in_project(builtin.oldfiles, "Recent Files"), "Recent files in
 map("<leader>fO", builtin.oldfiles, "Recent files everywhere")
 map("<leader>fh", builtin.help_tags, "Search help")
 map("<leader>fk", builtin.keymaps, "Search keymaps")
-map("<leader>fr", builtin.resume, "Resume last search")
+-- Resume reshows the cached results, so a git status picker would list the
+-- files as they were when it closed; that one runs git again instead, in the
+-- same project and with the same prompt text, back on the file that was
+-- highlighted (it can move, e.g. once staged)
+map("<leader>fr", function()
+    local last = (require("telescope.state").get_global_key("cached_pickers") or {})[1]
+    if not (last and vim.startswith(last.prompt_title or "", "Git Status")) then
+        return builtin.resume()
+    end
+    -- _selection_entry is telescope's internal field for the highlighted entry
+    -- (no public getter once the picker is closed); if it's ever renamed, this
+    -- is nil and the picker just starts at the top
+    local file = last._selection_entry and last._selection_entry.value
+    builtin.git_status({
+        cwd = last.cwd,
+        prompt_title = last.prompt_title,
+        default_text = last.cache_picker.cached_prompt,
+        -- Runs each time the results finish loading; only the first load
+        -- moves the selection, later ones (typing, <Tab>) are left alone
+        _completion_callbacks = {
+            function(picker)
+                if not file then
+                    return
+                end
+                local index = 1
+                for entry in picker.manager:iter() do
+                    if entry.value == file then
+                        picker:set_selection(picker:get_row(index))
+                        break
+                    end
+                    index = index + 1
+                end
+                file = nil
+            end,
+        },
+    })
+end, "Resume last search")
 map("<leader>fd", builtin.diagnostics, "Diagnostics")
 map("<leader>fs", builtin.lsp_document_symbols, "Symbols in file")
 map("<leader>fS", builtin.lsp_dynamic_workspace_symbols, "Symbols in project")

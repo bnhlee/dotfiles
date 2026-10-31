@@ -11,7 +11,24 @@ map("<leader>gg", "<cmd>tab Git<cr>", "Git status (fugitive)")
 map("<leader>gc", "<cmd>Git commit<cr>", "Git commit")
 map("<leader>gp", "<cmd>Git push<cr>", "Git push")
 map("<leader>gP", "<cmd>Git pull --rebase<cr>", "Git pull")
-map("<leader>gf", "<cmd>Git fetch<cr>", "Git fetch")
+-- Quiet when it works: fugitive prints git's progress and waits for Enter
+-- either way, so its output is only shown when the fetch fails
+map("<leader>gf", function()
+    local before = vim.fn.FugitiveResult().file
+    local ok, err = pcall(vim.cmd, "silent Git fetch")
+    local result = vim.fn.FugitiveResult()
+    if not ok then
+        vim.notify(err, vim.log.levels.ERROR)
+    elseif result.file ~= before and result.exit_status ~= 0 then
+        -- Progress lines are rewritten in place with \r; keep their last state
+        local lines = vim.tbl_map(function(line)
+            return line:match("([^\r]*)\r*$")
+        end, vim.fn.readfile(result.file))
+        vim.notify("Git fetch failed:\n" .. table.concat(lines, "\n"), vim.log.levels.ERROR)
+    else
+        vim.notify("Git fetch done")
+    end
+end, "Git fetch")
 map("<leader>gB", "<cmd>Git blame<cr>", "Git blame file")
 map("<leader>gd", "<cmd>Gvdiffsplit<cr>", "Diff file against index")
 map("<leader>gw", "<cmd>Gwrite<cr>", "Stage file")
