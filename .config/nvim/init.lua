@@ -19,6 +19,7 @@ vim.api.nvim_create_autocmd("PackChanged", {
 vim.pack.add({
     { src = "https://github.com/nvim-mini/mini.icons", },
     { src = "https://github.com/nvim-mini/mini.pairs", },
+    { src = "https://github.com/nvim-mini/mini.notify", },
     { src = "https://github.com/stevearc/oil.nvim", },
     { src = "https://github.com/nvim-lua/plenary.nvim", },
     { src = "https://github.com/nvim-telescope/telescope.nvim", },
@@ -37,6 +38,7 @@ vim.pack.add({
 })
 require("plugins.icons")
 require("plugins.pairs")
+require("plugins.notify")
 require("plugins.oil")
 require("plugins.telescope")
 require("plugins.harpoon")
