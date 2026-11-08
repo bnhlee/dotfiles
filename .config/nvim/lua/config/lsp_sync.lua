@@ -66,6 +66,11 @@ function M.file_state(file)
 end
 
 function M.fingerprint(root)
+    -- The root can be gone (e.g. a deleted git worktree), and vim.system
+    -- throws on a missing cwd instead of returning a failed result
+    if not vim.uv.fs_stat(root) then
+        return nil
+    end
     local head = vim.system({ "git", "rev-parse", "HEAD" }, { cwd = root }):wait()
     -- --no-optional-locks so this doesn't take git's index lock while an agent
     -- or the shell is running git in the same repo
@@ -162,7 +167,11 @@ function M.sync()
     local dirs = {}
     for root, old in pairs(fingerprints) do
         local new = M.fingerprint(root)
-        if new then
+        if not new and not vim.uv.fs_stat(root) then
+            -- Project deleted (e.g. a removed worktree): stop tracking it.
+            -- Clearing a key during pairs() is allowed
+            fingerprints[root] = nil
+        elseif new then
             local paths = M.changed_files(root, old, new)
             fingerprints[root] = new
             if next(paths) then

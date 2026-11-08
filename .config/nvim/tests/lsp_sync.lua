@@ -172,6 +172,42 @@ test("repo with no commits, then its first commit", function()
     eq(changes(root, function() write(root, "a.go", "package a // 1") end), { "a.go" })
 end)
 
+test("a deleted root has no fingerprint", function()
+    local root = default_repo()
+    vim.fn.delete(root, "rf")
+    eq(sync.fingerprint(root), nil)
+end)
+
+test("sync drops a root deleted after its server attached (removed worktree)", function()
+    local root = default_repo()
+    -- Record the root the way LspAttach does, with a stub client
+    local get_client = vim.lsp.get_client_by_id
+    vim.lsp.get_client_by_id = function()
+        return { root_dir = root }
+    end
+    local ok, err = pcall(vim.api.nvim_exec_autocmds, "LspAttach", { data = { client_id = 0 } })
+    vim.lsp.get_client_by_id = get_client
+    assert(ok, err)
+    vim.fn.delete(root, "rf")
+    -- Count the fingerprints taken of this root on each sync
+    local fingerprint, calls = sync.fingerprint, 0
+    sync.fingerprint = function(r)
+        if r == root then
+            calls = calls + 1
+        end
+        return fingerprint(r)
+    end
+    ok, err = pcall(function()
+        sync.sync()
+        eq(calls, 1)
+        sync.sync()
+        eq(calls, 1)
+    end)
+    sync.fingerprint = fingerprint
+    sync.reset()
+    assert(ok, err)
+end)
+
 print("-- sync_buffers")
 
 -- Start each test with a single window and no buffers
