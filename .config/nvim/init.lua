@@ -1,6 +1,7 @@
 require("config.options")
 require("config.navigation")
 require("config.keymaps")
+require("config.visual_match")
 
 vim.api.nvim_create_autocmd("PackChanged", {
     callback = function(ev)
